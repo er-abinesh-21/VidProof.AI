@@ -91,20 +91,6 @@ npm start
 
 The app will be available at `http://localhost:3000`
 
-## 🚀 Deployment
-
-### Deploy Frontend to Vercel
-
-1. Install Vercel CLI:
-```bash
-npm i -g vercel
-```
-
-2. Deploy:
-```bash
-vercel
-```
-
 3. Set environment variables in Vercel dashboard
 
 ### Configure Supabase
