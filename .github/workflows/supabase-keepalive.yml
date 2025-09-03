@@ -14,13 +14,32 @@ jobs:
         run: |
           # Ping the Supabase project URL to keep it awake
           echo "Pinging Supabase instance..."
-          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.SUPABASE_URL }} || echo "000")
           
-          if [ "$STATUS_CODE" -ge 200 ] && [ "$STATUS_CODE" -lt 400 ]; then
+          # Try pinging the auth endpoint which should always be available
+          AUTH_URL="${{ secrets.SUPABASE_URL }}/auth/v1/health"
+          echo "Checking: $AUTH_URL"
+          
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$AUTH_URL" || echo "000")
+          
+          # Supabase may return various status codes, we just need to confirm it's responding
+          if [ "$STATUS_CODE" -eq 200 ] || [ "$STATUS_CODE" -eq 204 ] || [ "$STATUS_CODE" -eq 404 ] || [ "$STATUS_CODE" -eq 401 ]; then
             echo "✅ Successfully pinged Supabase (Status: $STATUS_CODE)"
+            echo "Supabase instance is active and responding"
           else
-            echo "❌ Failed to ping Supabase (Status: $STATUS_CODE)"
-            exit 1
+            echo "⚠️ Unexpected status code: $STATUS_CODE"
+            echo "Attempting fallback ping to base URL..."
+            
+            # Fallback: Try base URL
+            BASE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.SUPABASE_URL }}" || echo "000")
+            echo "Base URL status: $BASE_STATUS"
+            
+            # As long as we get ANY response, the instance is active
+            if [ "$BASE_STATUS" -ne 000 ]; then
+              echo "✅ Supabase is responding (Status: $BASE_STATUS)"
+            else
+              echo "❌ Failed to reach Supabase"
+              exit 1
+            fi
           fi
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
