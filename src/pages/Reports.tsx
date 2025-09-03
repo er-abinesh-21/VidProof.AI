@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { FiArrowLeft, FiDownload, FiShield, FiAlertTriangle, FiFileText, FiClock, FiImage, FiUploadCloud } from 'react-icons/fi';
+import { FiArrowLeft, FiDownload, FiShield, FiAlertTriangle, FiFileText, FiClock, FiImage, FiUploadCloud, FiTrash2 } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement } from 'chart.js';
 import { Doughnut, Bar } from 'react-chartjs-2';
@@ -18,6 +18,9 @@ const Reports: React.FC = () => {
   const [reports, setReports] = useState<VerificationReport[]>([]);
   const [selectedReport, setSelectedReport] = useState<VerificationReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [reportToDelete, setReportToDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -63,6 +66,79 @@ const Reports: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleDeleteClick = (e: React.MouseEvent, reportId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setReportToDelete(reportId);
+    setDeleteModalOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!reportToDelete || !user) {
+      console.error('Missing reportToDelete or user');
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      console.log('Attempting to delete report:', reportToDelete);
+      console.log('User ID:', user.id);
+      
+      // First, let's verify the report exists and belongs to the user
+      const { data: reportCheck, error: checkError } = await supabase
+        .from('verification_reports')
+        .select('*')
+        .eq('id', reportToDelete)
+        .single();
+      
+      console.log('Report check:', { reportCheck, checkError });
+      
+      if (checkError || !reportCheck) {
+        console.error('Report not found or error checking:', checkError);
+        toast.error('Report not found');
+        return;
+      }
+      
+      // Now attempt to delete
+      const { error } = await supabase
+        .from('verification_reports')
+        .delete()
+        .eq('id', reportToDelete);
+
+      console.log('Delete error (if any):', error);
+
+      if (error) {
+        console.error('Supabase delete error:', error);
+        // If error contains RLS policy message, provide more helpful feedback
+        if (error.message?.includes('policy')) {
+          toast.error('Permission denied. Please refresh the page and try again.');
+        } else {
+          toast.error(error.message || 'Failed to delete report');
+        }
+        return;
+      }
+
+      // Successfully deleted
+      toast.success('Report deleted successfully');
+      setReports(reports.filter(r => r.id !== reportToDelete));
+      setDeleteModalOpen(false);
+      setReportToDelete(null);
+      
+      // Optionally refresh the reports list to ensure consistency
+      fetchReports();
+    } catch (error: any) {
+      console.error('Error deleting report:', error);
+      toast.error(error.message || 'Failed to delete report');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleDeleteCancel = () => {
+    setDeleteModalOpen(false);
+    setReportToDelete(null);
   };
 
   const generatePDF = (report: VerificationReport) => {
@@ -1189,16 +1265,47 @@ const Reports: React.FC = () => {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3" style={{ gap: '2.5rem', rowGap: '3.5rem' }}>
               {reports.map((report) => (
-                <motion.div
+                <div
                   key={report.id}
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  whileHover={{ scale: 1.05, y: -5 }}
-                  whileTap={{ scale: 0.98 }}
-                  transition={{ type: 'spring', stiffness: 300 }}
+                  style={{ position: 'relative' }}
                 >
-                  <Link to={`/report/${report.id}`} style={{ textDecoration: 'none', display: 'block' }}>
-                    <div style={{
+                  <button
+                    onClick={(e) => handleDeleteClick(e, report.id)}
+                    style={{
+                      position: 'absolute',
+                      top: '0.5rem',
+                      right: '0.5rem',
+                      background: 'rgba(239, 68, 68, 0.1)',
+                      border: '1px solid rgba(239, 68, 68, 0.2)',
+                      borderRadius: '8px',
+                      padding: '0.5rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      zIndex: 20,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)';
+                      e.currentTarget.style.transform = 'scale(1.1)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+                      e.currentTarget.style.transform = 'scale(1)';
+                    }}
+                  >
+                    <FiTrash2 style={{ color: '#ef4444', fontSize: '1rem' }} />
+                  </button>
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    whileHover={{ scale: 1.02, y: -3 }}
+                    whileTap={{ scale: 0.98 }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 20 }}
+                  >
+                    <Link to={`/report/${report.id}`} style={{ textDecoration: 'none', display: 'block' }}>
+                      <div style={{
                       background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)',
                       backdropFilter: 'blur(16px) saturate(200%)',
                       WebkitBackdropFilter: 'blur(16px) saturate(200%)',
@@ -1267,11 +1374,134 @@ const Reports: React.FC = () => {
                       </div>
                     </div>
                   </Link>
-                </motion.div>
+                  </motion.div>
+                </div>
               ))}
             </div>
           )}
         </motion.div>
+
+        {/* Delete Confirmation Modal */}
+        {deleteModalOpen && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000
+          }}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              style={{
+                background: 'linear-gradient(135deg, rgba(30, 30, 46, 0.98) 0%, rgba(20, 20, 35, 0.98) 100%)',
+                backdropFilter: 'blur(20px) saturate(200%)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '20px',
+                padding: '2rem',
+                maxWidth: '400px',
+                width: '90%',
+                boxShadow: '0 24px 48px rgba(0, 0, 0, 0.4)'
+              }}
+            >
+              <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+                <div style={{
+                  width: '60px',
+                  height: '60px',
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 1rem'
+                }}>
+                  <FiAlertTriangle style={{ fontSize: '1.75rem', color: '#ef4444' }} />
+                </div>
+                <h3 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#f1f5f9', marginBottom: '0.5rem' }}>
+                  Delete Report?
+                </h3>
+                <p style={{ color: '#94a3b8', fontSize: '0.95rem' }}>
+                  This action cannot be undone. The report will be permanently deleted.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <button
+                  onClick={handleDeleteCancel}
+                  disabled={deleting}
+                  style={{
+                    flex: 1,
+                    padding: '0.75rem',
+                    background: 'rgba(148, 163, 184, 0.1)',
+                    border: '1px solid rgba(148, 163, 184, 0.2)',
+                    borderRadius: '12px',
+                    color: '#e2e8f0',
+                    fontWeight: '600',
+                    cursor: deleting ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.2s',
+                    opacity: deleting ? 0.5 : 1
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!deleting) {
+                      e.currentTarget.style.background = 'rgba(148, 163, 184, 0.2)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(148, 163, 184, 0.1)';
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteConfirm}
+                  disabled={deleting}
+                  style={{
+                    flex: 1,
+                    padding: '0.75rem',
+                    background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                    border: 'none',
+                    borderRadius: '12px',
+                    color: 'white',
+                    fontWeight: '600',
+                    cursor: deleting ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.2s',
+                    opacity: deleting ? 0.7 : 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!deleting) {
+                      e.currentTarget.style.transform = 'scale(1.02)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'scale(1)';
+                  }}
+                >
+                  {deleting ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                      <span>Deleting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <FiTrash2 />
+                      <span>Delete</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </div>
     </div>
   );

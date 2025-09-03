@@ -126,13 +126,14 @@ const Login: React.FC = () => {
                       required
                       style={{
                         width: '100%',
-                        padding: '0.75rem 1rem 0.75rem 2.75rem',
+                        padding: '0.75rem 2.75rem',
                         border: '1px solid #e5e7eb',
                         borderRadius: '12px',
                         fontSize: '0.95rem',
                         outline: 'none',
                         transition: 'all 0.2s',
-                        background: 'white'
+                        background: 'white',
+                        color: '#1a1a1a'
                       }}
                       onFocus={(e) => {
                         e.target.style.borderColor = '#9333ea';
@@ -178,7 +179,8 @@ const Login: React.FC = () => {
                         fontSize: '0.95rem',
                         outline: 'none',
                         transition: 'all 0.2s',
-                        background: 'white'
+                        background: 'white',
+                        color: '#1a1a1a'
                       }}
                       onFocus={(e) => {
                         e.target.style.borderColor = '#9333ea';
@@ -264,10 +266,10 @@ const Login: React.FC = () => {
                   }}
                 >
                   {loading ? (
-                    <>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
                       <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
                       <span>Signing in...</span>
-                    </>
+                    </div>
                   ) : (
                     'Log In'
                   )}

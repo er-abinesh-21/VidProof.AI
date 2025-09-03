@@ -222,7 +222,8 @@ const Register: React.FC = () => {
                         fontSize: '0.95rem',
                         outline: 'none',
                         transition: 'all 0.2s',
-                        background: 'white'
+                        background: 'white',
+                        color: '#1a1a1a'
                       }}
                       onFocus={(e) => {
                         e.target.style.borderColor = '#9333ea';
@@ -268,7 +269,8 @@ const Register: React.FC = () => {
                         fontSize: '0.95rem',
                         outline: 'none',
                         transition: 'all 0.2s',
-                        background: 'white'
+                        background: 'white',
+                        color: '#1a1a1a'
                       }}
                       onFocus={(e) => {
                         e.target.style.borderColor = '#9333ea';
@@ -314,7 +316,8 @@ const Register: React.FC = () => {
                         fontSize: '0.95rem',
                         outline: 'none',
                         transition: 'all 0.2s',
-                        background: 'white'
+                        background: 'white',
+                        color: '#1a1a1a'
                       }}
                       onFocus={(e) => {
                         e.target.style.borderColor = '#9333ea';
@@ -403,7 +406,8 @@ const Register: React.FC = () => {
                         fontSize: '0.95rem',
                         outline: 'none',
                         transition: 'all 0.2s',
-                        background: 'white'
+                        background: 'white',
+                        color: '#1a1a1a'
                       }}
                       onFocus={(e) => {
                         e.target.style.borderColor = confirmPassword && password !== confirmPassword ? '#ef4444' : '#9333ea';
@@ -478,10 +482,10 @@ const Register: React.FC = () => {
                   }}
                 >
                   {loading ? (
-                    <>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
                       <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
                       <span>Creating account...</span>
-                    </>
+                    </div>
                   ) : (
                     'Sign Up'
                   )}
