@@ -1,0 +1,26 @@
+name: Supabase Keepalive
+
+on:
+  workflow_dispatch:  # Allows manual triggering
+  schedule:
+    # Runs every 12 hours (at minute 0)
+    - cron: '0 */12 * * *'
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase
+        run: |
+          # Ping the Supabase project URL to keep it awake
+          echo "Pinging Supabase instance..."
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.SUPABASE_URL }} || echo "000")
+          
+          if [ "$STATUS_CODE" -ge 200 ] && [ "$STATUS_CODE" -lt 400 ]; then
+            echo "✅ Successfully pinged Supabase (Status: $STATUS_CODE)"
+          else
+            echo "❌ Failed to ping Supabase (Status: $STATUS_CODE)"
+            exit 1
+          fi
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
