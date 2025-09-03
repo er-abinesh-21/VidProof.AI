@@ -1,31 +1,8 @@
 {
-  "version": 2,
-  "name": "vidproof",
-  "builds": [
+  "rewrites": [
     {
-      "src": "package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "build"
-      }
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
-  ],
-  "routes": [
-    {
-      "src": "/static/(.*)",
-      "headers": {
-        "cache-control": "s-maxage=31536000, immutable"
-      },
-      "dest": "/static/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/"
-    }
-  ],
-  "env": {
-    "REACT_APP_SUPABASE_URL": "@supabase_url",
-    "REACT_APP_SUPABASE_ANON_KEY": "@supabase_anon_key",
-    "REACT_APP_HUGGINGFACE_API_KEY": "@huggingface_api_key"
-  }
+  ]
 }
