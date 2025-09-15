@@ -3,8 +3,8 @@ name: Supabase Keepalive
 on:
   workflow_dispatch:  # Allows manual triggering
   schedule:
-    # Runs every 12 hours (at minute 0)
-    - cron: '0 */12 * * *'
+    # Runs at every 5 minutes
+    - cron: '*/5 * * * *'
 
 jobs:
   keepalive:
