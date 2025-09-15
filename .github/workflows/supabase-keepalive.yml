@@ -14,13 +14,33 @@ jobs:
         run: |
           echo "Keeping Supabase instance active..."
           
-          # Simply make a request to the Supabase URL
-          # The || true ensures the workflow always succeeds
+          # 1. Ping the base Supabase URL
+          echo "Pinging base URL..."
           curl "${{ secrets.SUPABASE_URL }}" \
             --max-time 10 \
             --silent \
             --output /dev/null \
-            --write-out "HTTP Status: %{http_code}\n" \
+            --write-out "Base URL Status: %{http_code}\n" \
             || true
           
-          echo "✅ Keepalive request sent - Supabase will stay active"
+          # 2. Ping the REST API endpoint to keep database active
+          echo "Pinging REST API..."
+          curl "${{ secrets.SUPABASE_URL }}/rest/v1/" \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+            --max-time 10 \
+            --silent \
+            --output /dev/null \
+            --write-out "REST API Status: %{http_code}\n" \
+            || true
+          
+          # 3. Ping the Auth endpoint
+          echo "Pinging Auth service..."
+          curl "${{ secrets.SUPABASE_URL }}/auth/v1/health" \
+            --max-time 10 \
+            --silent \
+            --output /dev/null \
+            --write-out "Auth Status: %{http_code}\n" \
+            || true
+          
+          echo "✅ All keepalive requests sent - Supabase will stay active"

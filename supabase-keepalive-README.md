@@ -4,12 +4,18 @@ This workflow ensures your Supabase instance stays active by pinging it every 12
 
 ## Setup Instructions
 
-1. **Add Supabase URL to GitHub Secrets**
+1. **Add Supabase Secrets to GitHub**
    - Go to your GitHub repository
    - Navigate to Settings > Secrets > Actions
-   - Click "New repository secret"
+   - Add two secrets:
+   
+   **Secret 1:**
    - Name: `SUPABASE_URL`
    - Value: Your Supabase project URL (e.g., `https://xxxxxxxxxxxxx.supabase.co`)
+   
+   **Secret 2:**
+   - Name: `SUPABASE_ANON_KEY`
+   - Value: Your Supabase anon/public key (from your Supabase dashboard)
 
 2. **Verify Workflow**
    - The workflow will run automatically every 12 hours
