@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { FiUpload, FiFileText, FiTrendingUp, FiActivity, FiClock, FiCheckCircle, FiVideo } from 'react-icons/fi';
+import { FiUpload, FiFileText, FiTrendingUp, FiClock, FiCheckCircle, FiVideo } from 'react-icons/fi';
 import { Link } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import toast from 'react-hot-toast';
+import { db, COLLECTIONS, isExpired, VerificationReport, VideoUpload } from '../lib/firebase';
+import Navbar from '../components/Navbar';
 import { useAuth } from '../contexts/AuthContext';
 import { Line, Doughnut } from 'react-chartjs-2';
 import {
@@ -32,43 +35,64 @@ ChartJS.register(
 
 interface Stats {
   totalUploads: number;
+  uploadsThisWeek: number;
   verifiedVideos: number;
   averageScore: number;
   recentReports: number;
   pendingAnalysis: number;
   flaggedContent: number;
   processingTime: number;
-  successRate: number;
+  hasReports: boolean;
 }
 
-interface RecentActivity {
-  id: string;
-  type: 'upload' | 'verification' | 'report';
-  title: string;
-  time: string;
-  status: 'success' | 'warning' | 'pending';
-}
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const EMPTY_STATS: Stats = {
+  totalUploads: 0,
+  uploadsThisWeek: 0,
+  verifiedVideos: 0,
+  averageScore: 0,
+  recentReports: 0,
+  pendingAnalysis: 0,
+  flaggedContent: 0,
+  processingTime: 0,
+  hasReports: false
+};
+
+const average = (values: number[]) =>
+  values.length > 0 ? values.reduce((acc, v) => acc + v, 0) / values.length : 0;
+
+// Last 7 calendar days (oldest first) with the average authenticity score and deepfake risk of reports made that day
+const buildWeeklySeries = (reports: VerificationReport[]) => {
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - (6 - i));
+    return date;
+  });
+
+  const labels = days.map(d => d.toLocaleDateString(undefined, { weekday: 'short' }));
+  const authenticity: (number | null)[] = [];
+  const deepfake: (number | null)[] = [];
+
+  days.forEach(day => {
+    const start = day.getTime();
+    const dayReports = reports.filter(r => {
+      const created = new Date(r.created_at).getTime();
+      return created >= start && created < start + DAY_MS;
+    });
+    authenticity.push(dayReports.length ? Math.round(average(dayReports.map(r => r.authenticity_score))) : null);
+    deepfake.push(dayReports.length ? Math.round(average(dayReports.map(r => r.deepfake_likelihood))) : null);
+  });
+
+  return { labels, authenticity, deepfake };
+};
 
 const Dashboard: React.FC = () => {
   const { user } = useAuth();
-  const [stats, setStats] = useState<Stats>({
-    totalUploads: 12,
-    verifiedVideos: 8,
-    averageScore: 85,
-    recentReports: 10,
-    pendingAnalysis: 2,
-    flaggedContent: 1,
-    processingTime: 45,
-    successRate: 92
-  });
+  const [stats, setStats] = useState<Stats>(EMPTY_STATS);
+  const [weekly, setWeekly] = useState(() => buildWeeklySeries([]));
   const [loading, setLoading] = useState(true);
-  // Recent activities could be fetched from API in the future
-  // const [recentActivities] = useState<RecentActivity[]>([
-  //   { id: '1', type: 'upload', title: 'Interview_2024.mp4', time: '2 hours ago', status: 'success' },
-  //   { id: '2', type: 'verification', title: 'News_Clip_Analysis', time: '5 hours ago', status: 'success' },
-  //   { id: '3', type: 'report', title: 'Deepfake Detection Report', time: '1 day ago', status: 'warning' },
-  //   { id: '4', type: 'upload', title: 'Conference_Recording.mp4', time: '2 days ago', status: 'pending' }
-  // ]);
 
   useEffect(() => {
     fetchStats();
@@ -79,45 +103,49 @@ const Dashboard: React.FC = () => {
     setLoading(true);
 
     try {
-      const { data: uploads } = await supabase
-        .from('video_uploads')
-        .select('*')
-        .eq('user_id', user.id);
+      const [uploadsSnap, reportsSnap] = await Promise.all([
+        getDocs(query(collection(db, COLLECTIONS.videoUploads), where('user_id', '==', user.uid))),
+        getDocs(query(collection(db, COLLECTIONS.verificationReports), where('user_id', '==', user.uid)))
+      ]);
+      const uploads = uploadsSnap.docs
+        .map(d => ({ id: d.id, ...d.data() } as VideoUpload))
+        .filter(u => !isExpired(u));
+      const reports = reportsSnap.docs
+        .map(d => ({ id: d.id, ...d.data() } as VerificationReport))
+        .filter(r => !isExpired(r));
 
-      const { data: reports } = await supabase
-        .from('verification_reports')
-        .select('*')
-        .eq('user_id', user.id);
-
-      const verifiedCount = reports?.filter(r => r.authenticity_score >= 70).length || 0;
-      const flaggedCount = reports?.filter(r => r.authenticity_score < 50).length || 0;
-      const avgScore = reports && reports.length > 0
-        ? reports.reduce((acc, r) => acc + r.authenticity_score, 0) / reports.length
-        : 0;
+      const weekAgo = Date.now() - 7 * DAY_MS;
+      const processingTimes = reports
+        .map(r => r.metadata?.processing_seconds)
+        .filter((t): t is number => typeof t === 'number');
 
       setStats({
-        totalUploads: uploads?.length || 12,
-        verifiedVideos: verifiedCount || 8,
-        averageScore: Math.round(avgScore) || 85,
-        recentReports: reports?.length || 10,
-        pendingAnalysis: 2,
-        flaggedContent: flaggedCount || 1,
-        processingTime: 45,
-        successRate: 92
+        totalUploads: uploads.length,
+        uploadsThisWeek: uploads.filter(u => new Date(u.created_at).getTime() >= weekAgo).length,
+        verifiedVideos: reports.filter(r => r.authenticity_score >= 70).length,
+        averageScore: Math.round(average(reports.map(r => r.authenticity_score))),
+        recentReports: reports.length,
+        pendingAnalysis: uploads.filter(u => u.status === 'pending' || u.status === 'processing').length,
+        flaggedContent: reports.filter(r => r.authenticity_score < 50).length,
+        processingTime: Math.round(average(processingTimes)),
+        hasReports: reports.length > 0
       });
+      setWeekly(buildWeeklySeries(reports));
     } catch (error) {
       console.error('Error fetching stats:', error);
+      toast.error('Failed to load dashboard data');
     } finally {
       setLoading(false);
     }
   };
 
   const chartData = {
-    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+    labels: weekly.labels,
     datasets: [
       {
         label: 'Authenticity Score',
-        data: [85, 88, 82, 90, 87, 92, 89],
+        data: weekly.authenticity,
+        spanGaps: true,
         fill: true,
         backgroundColor: 'rgba(129, 140, 248, 0.1)',
         borderColor: '#818cf8',
@@ -129,14 +157,15 @@ const Dashboard: React.FC = () => {
         pointBorderWidth: 2
       },
       {
-        label: 'Processing Speed',
-        data: [92, 85, 88, 86, 91, 89, 94],
+        label: 'Deepfake Risk',
+        data: weekly.deepfake,
+        spanGaps: true,
         fill: false,
-        borderColor: '#34d399',
+        borderColor: '#f87171',
         borderWidth: 2,
         tension: 0.4,
         pointRadius: 4,
-        pointBackgroundColor: '#34d399',
+        pointBackgroundColor: '#f87171',
         pointBorderColor: '#fff',
         pointBorderWidth: 2
       }
@@ -276,6 +305,8 @@ const Dashboard: React.FC = () => {
   }
 
   return (
+    <>
+    <Navbar />
     <div className="min-h-screen" style={{ 
       background: 'linear-gradient(135deg, #0f0f1e 0%, #1a1a2e 100%)',
       position: 'relative',
@@ -366,7 +397,7 @@ const Dashboard: React.FC = () => {
                   fontSize: '0.75rem',
                   color: '#818cf8',
                   fontWeight: '600'
-                }}>+12% this week</span>
+                }}>{stats.uploadsThisWeek} this week</span>
               </div>
               <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginBottom: '0.75rem', fontWeight: '500', letterSpacing: '0.025em' }}>Total Videos</p>
               <p style={{ fontSize: '2.5rem', fontWeight: '700', color: '#ffffff', lineHeight: '1' }}>{stats.totalUploads}</p>
@@ -436,10 +467,10 @@ const Dashboard: React.FC = () => {
                   fontSize: '0.75rem',
                   color: '#a78bfa',
                   fontWeight: '600'
-                }}>High Score</span>
+                }}>{!stats.hasReports ? 'No data' : stats.averageScore >= 70 ? 'High Score' : stats.averageScore >= 40 ? 'Moderate' : 'Low Score'}</span>
               </div>
               <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginBottom: '0.75rem', fontWeight: '500', letterSpacing: '0.025em' }}>Average Score</p>
-              <p style={{ fontSize: '2.5rem', fontWeight: '700', color: '#ffffff', lineHeight: '1' }}>{stats.averageScore}%</p>
+              <p style={{ fontSize: '2.5rem', fontWeight: '700', color: '#ffffff', lineHeight: '1' }}>{stats.hasReports ? `${stats.averageScore}%` : '—'}</p>
             </div>
           </motion.div>
 
@@ -471,10 +502,10 @@ const Dashboard: React.FC = () => {
                   fontSize: '0.75rem',
                   color: '#fbbf24',
                   fontWeight: '600'
-                }}>Fast</span>
+                }}>{stats.processingTime === 0 ? 'No data' : stats.processingTime <= 60 ? 'Fast' : 'Slow'}</span>
               </div>
               <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginBottom: '0.75rem', fontWeight: '500', letterSpacing: '0.025em' }}>Avg. Processing</p>
-              <p style={{ fontSize: '2.5rem', fontWeight: '700', color: '#ffffff', lineHeight: '1' }}>{stats.processingTime}s</p>
+              <p style={{ fontSize: '2.5rem', fontWeight: '700', color: '#ffffff', lineHeight: '1' }}>{stats.processingTime === 0 ? '—' : `${stats.processingTime}s`}</p>
             </div>
           </motion.div>
         </div>
@@ -622,6 +653,7 @@ const Dashboard: React.FC = () => {
         </motion.div>
       </div>
     </div>
+    </>
   );
 };
 

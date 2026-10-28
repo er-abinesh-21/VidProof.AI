@@ -1,286 +1,321 @@
-import axios from 'axios';
-import { supabase } from '../lib/supabase';
+import { addDoc, collection, doc, updateDoc } from 'firebase/firestore';
+import { db, COLLECTIONS, expiryDate } from '../lib/firebase';
 import toast from 'react-hot-toast';
 
-const HUGGINGFACE_API_KEY = process.env.REACT_APP_HUGGINGFACE_API_KEY;
-const HF_API_URL = 'https://api-inference.huggingface.co/models';
+// When true, results are replaced with clearly labelled placeholder data if the AI models cannot run
+const DEMO_MODE = process.env.REACT_APP_DEMO_MODE === 'true';
 
-// Hugging Face model endpoints
+// Free, open-source models that run locally in the browser (see ai.worker.ts); no API key or server needed.
+// Keep these names in sync with the worker.
 const MODELS = {
-  deepfake: 'umm-maybe/AI-image-detector', // Deepfake/AI detection model
-  whisper: 'openai/whisper-base', // Speech-to-text
-  sentiment: 'distilbert-base-uncased-finetuned-sst-2-english', // Sentiment analysis
-  videoFrames: 'microsoft/resnet-50' // Frame analysis
+  deepfake: 'onnx-community/Deep-Fake-Detector-v2-Model-ONNX',
+  whisper: 'Xenova/whisper-tiny',
+  sentiment: 'Xenova/distilbert-base-uncased-finetuned-sst-2-english'
 };
 
-interface ProcessingResult {
-  authenticity_score: number;
-  deepfake_likelihood: number;
-  transcript: string;
-  sentiment_analysis: {
-    positive: number;
-    negative: number;
-    neutral: number;
-  };
-  tampering_indicators: string[];
-  key_frames: string[];
+const FRAME_COUNT = 5;
+const MAX_FRAME_WIDTH = 640; // keeps stored frames small enough for Firestore's 1MB document limit
+const FRAME_EXTRACTION_TIMEOUT_MS = 30000;
+const MAX_TRANSCRIPT_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_TRANSCRIPT_SECONDS = 300; // only the first 5 minutes are transcribed
+const WHISPER_SAMPLE_RATE = 16000;
+const SILENCE_THRESHOLD = 0.01;
+const MAX_SENTIMENT_CHARS = 2000;
+
+interface Sentiment {
+  positive: number;
+  negative: number;
+  neutral: number;
 }
 
-// Extract frames from video (client-side)
-const extractFrames = async (videoUrl: string, numFrames: number = 5): Promise<string[]> => {
-  return new Promise((resolve) => {
+// Extract frames from a video (client-side), sampled from the middle of each segment
+const extractFrames = (videoUrl: string, numFrames: number = FRAME_COUNT): Promise<string[]> =>
+  new Promise((resolve) => {
     const video = document.createElement('video');
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
     const frames: string[] = [];
+    let settled = false;
 
-    video.crossOrigin = 'anonymous';
-    video.src = videoUrl;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      video.removeAttribute('src');
+      video.load();
+      resolve(frames);
+    };
+    // Unsupported codecs can leave the video silent (no events at all), so never wait forever
+    const timer = setTimeout(finish, FRAME_EXTRACTION_TIMEOUT_MS);
 
+    video.muted = true;
+    video.preload = 'auto';
+    video.addEventListener('error', finish);
     video.addEventListener('loadedmetadata', () => {
       const duration = video.duration;
-      const interval = duration / numFrames;
-      let currentTime = 0;
+      if (!context || !isFinite(duration) || duration <= 0 || !video.videoWidth) {
+        finish();
+        return;
+      }
 
-      const captureFrame = () => {
-        if (currentTime >= duration || frames.length >= numFrames) {
-          resolve(frames);
+      const interval = duration / numFrames;
+      const scale = Math.min(1, MAX_FRAME_WIDTH / video.videoWidth);
+      canvas.width = Math.round(video.videoWidth * scale);
+      canvas.height = Math.round(video.videoHeight * scale);
+      let index = 0;
+
+      const captureNext = () => {
+        if (index >= numFrames) {
+          finish();
           return;
         }
-
-        video.currentTime = currentTime;
-        video.addEventListener('seeked', () => {
-          if (context) {
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            context.drawImage(video, 0, 0, canvas.width, canvas.height);
-            frames.push(canvas.toDataURL('image/jpeg', 0.8));
-          }
-          currentTime += interval;
-          if (frames.length < numFrames) {
-            captureFrame();
-          } else {
-            resolve(frames);
-          }
-        }, { once: true });
+        video.addEventListener('seeked', onSeeked, { once: true });
+        video.currentTime = Math.min(duration - 0.05, interval * (index + 0.5));
       };
 
-      captureFrame();
+      const onSeeked = () => {
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        frames.push(canvas.toDataURL('image/jpeg', 0.7));
+        index++;
+        captureNext();
+      };
+
+      captureNext();
     });
 
-    video.addEventListener('error', () => {
-      console.error('Error loading video');
-      resolve([]);
-    });
+    video.src = videoUrl;
   });
+
+// Talks to the AI worker; resolves to null (never fake data) when a model cannot run
+let worker: Worker | null = null;
+let nextRequestId = 0;
+const pending = new Map<number, (result: { value?: any; failed?: boolean }) => void>();
+
+const failAllPending = () => {
+  pending.forEach((resolve) => resolve({ failed: true }));
+  pending.clear();
+  worker?.terminate();
+  worker = null;
 };
 
-// Call Hugging Face API
-const callHuggingFaceAPI = async (model: string, data: any) => {
-  try {
-    const response = await axios.post(
-      `${HF_API_URL}/${model}`,
-      data,
-      {
-        headers: {
-          'Authorization': `Bearer ${HUGGINGFACE_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-    return response.data;
-  } catch (error: any) {
-    console.error(`Error calling ${model}:`, error);
-    // Return mock data for demo purposes when API is not available
-    return getMockData(model);
-  }
-};
-
-// Mock data for demo when API keys are not configured
-const getMockData = (model: string) => {
-  switch (model) {
-    case MODELS.deepfake:
-      return [{ label: 'REAL', score: 0.85 }];
-    case MODELS.whisper:
-      return { text: 'This is a sample transcript of the video content. The speaker discusses important topics related to the subject matter.' };
-    case MODELS.sentiment:
-      return [
-        { label: 'POSITIVE', score: 0.6 },
-        { label: 'NEGATIVE', score: 0.1 }
-      ];
-    default:
-      return {};
-  }
-};
-
-// Analyze video frames for deepfake detection
-const analyzeFramesForDeepfake = async (frames: string[]): Promise<number> => {
-  if (!frames.length) return 50;
-
-  let totalDeepfakeScore = 0;
-  let validFrames = 0;
-
-  for (const frame of frames) {
-    try {
-      // Convert base64 to blob for API
-      const base64Data = frame.split(',')[1];
-      const result = await callHuggingFaceAPI(MODELS.deepfake, {
-        inputs: base64Data
-      });
-
-      if (result && result[0]) {
-        const fakeScore = result[0].label === 'FAKE' ? result[0].score : 1 - result[0].score;
-        totalDeepfakeScore += fakeScore * 100;
-        validFrames++;
-      }
-    } catch (error) {
-      console.error('Error analyzing frame:', error);
-    }
-  }
-
-  return validFrames > 0 ? Math.round(totalDeepfakeScore / validFrames) : 50;
-};
-
-// Extract audio and perform speech-to-text
-const extractTranscript = async (videoUrl: string): Promise<string> => {
-  try {
-    // In a real implementation, you would extract audio from video
-    // and send it to Whisper API
-    const result = await callHuggingFaceAPI(MODELS.whisper, {
-      inputs: videoUrl
-    });
-    return result.text || 'Unable to extract transcript';
-  } catch (error) {
-    console.error('Error extracting transcript:', error);
-    return 'Transcript extraction failed';
-  }
-};
-
-// Analyze sentiment of transcript
-const analyzeSentiment = async (text: string): Promise<any> => {
-  try {
-    const result = await callHuggingFaceAPI(MODELS.sentiment, {
-      inputs: text
-    });
-
-    let positive = 0, negative = 0, neutral = 0;
-
-    if (result && result[0]) {
-      result.forEach((item: any) => {
-        if (item.label === 'POSITIVE') positive = item.score * 100;
-        else if (item.label === 'NEGATIVE') negative = item.score * 100;
-      });
-      neutral = 100 - positive - negative;
-    }
-
-    return {
-      positive: Math.round(positive),
-      negative: Math.round(negative),
-      neutral: Math.round(neutral)
+const getWorker = (): Worker => {
+  if (!worker) {
+    worker = new Worker(new URL('./ai.worker.ts', import.meta.url));
+    worker.onmessage = (event: MessageEvent) => {
+      const { id, result, error } = event.data;
+      const resolve = pending.get(id);
+      if (!resolve) return;
+      pending.delete(id);
+      if (error) console.error('AI worker error:', error);
+      resolve(error ? { failed: true } : { value: result });
     };
-  } catch (error) {
-    console.error('Error analyzing sentiment:', error);
-    return { positive: 33, negative: 33, neutral: 34 };
+    worker.onerror = (event) => {
+      console.error('AI worker crashed:', event.message);
+      failAllPending();
+    };
   }
+  return worker;
+};
+
+const runModel = <T>(task: string, payload: object, transfer: Transferable[] = []): Promise<T | null> =>
+  new Promise((resolve) => {
+    const id = nextRequestId++;
+    pending.set(id, (res) => resolve(res.failed ? null : (res.value as T)));
+    try {
+      getWorker().postMessage({ id, task, payload }, transfer);
+    } catch (error) {
+      console.error('Could not start AI worker:', error);
+      pending.delete(id);
+      resolve(null);
+    }
+  });
+
+// Average deepfake likelihood (0-100) across frames, or null if the model could not run
+const analyzeFramesForDeepfake = async (frames: string[]): Promise<number | null> => {
+  const probabilities = await runModel<number[]>('deepfake', { frames });
+  if (!probabilities || probabilities.length === 0) return null;
+  return Math.round((probabilities.reduce((acc, p) => acc + p, 0) / probabilities.length) * 100);
+};
+
+// Decode the video's audio track to 16kHz mono samples; null when there is no usable audio
+const extractAudio = async (file: File): Promise<Float32Array | null> => {
+  if (file.size > MAX_TRANSCRIPT_FILE_BYTES) return null;
+
+  const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+  if (!AudioContextClass) return null;
+  const audioContext = new AudioContextClass({ sampleRate: WHISPER_SAMPLE_RATE });
+
+  try {
+    const decoded = await audioContext.decodeAudioData(await file.arrayBuffer());
+    const length = Math.min(decoded.length, MAX_TRANSCRIPT_SECONDS * WHISPER_SAMPLE_RATE);
+    const mono = new Float32Array(length);
+    for (let channel = 0; channel < decoded.numberOfChannels; channel++) {
+      const data = decoded.getChannelData(channel);
+      for (let i = 0; i < length; i++) mono[i] += data[i] / decoded.numberOfChannels;
+    }
+
+    // Whisper invents text for silence, so skip it
+    let peak = 0;
+    for (let i = 0; i < length; i++) peak = Math.max(peak, Math.abs(mono[i]));
+    return peak < SILENCE_THRESHOLD ? null : mono;
+  } catch (error) {
+    console.warn('Could not decode audio from this video:', error);
+    return null;
+  } finally {
+    audioContext.close().catch(() => {});
+  }
+};
+
+// Speech-to-text on the video's audio track; null when unavailable
+const extractTranscript = async (file: File): Promise<string | null> => {
+  const audio = await extractAudio(file);
+  if (!audio) return null;
+  const text = await runModel<string>('transcribe', { audio }, [audio.buffer]);
+  return text && text.length > 2 ? text : null;
+};
+
+// Analyze sentiment of transcript; null when unavailable
+const analyzeSentiment = async (text: string): Promise<Sentiment | null> => {
+  const labels = await runModel<{ label: string; score: number }[]>('sentiment', {
+    text: text.slice(0, MAX_SENTIMENT_CHARS)
+  });
+  if (!labels) return null;
+
+  let positive = 0;
+  let negative = 0;
+  labels.forEach((item) => {
+    if (/positive/i.test(item.label)) positive = item.score * 100;
+    else if (/negative/i.test(item.label)) negative = item.score * 100;
+  });
+
+  const roundedPositive = Math.round(positive);
+  const roundedNegative = Math.round(negative);
+  return {
+    positive: roundedPositive,
+    negative: roundedNegative,
+    neutral: Math.max(0, 100 - roundedPositive - roundedNegative)
+  };
 };
 
 // Detect tampering indicators
-const detectTamperingIndicators = (deepfakeScore: number, sentimentScores: any): string[] => {
+const detectTamperingIndicators = (deepfakeScore: number, sentiment: Sentiment | null): string[] => {
   const indicators: string[] = [];
 
   if (deepfakeScore > 70) {
     indicators.push('High probability of AI-generated or manipulated content detected');
-  }
-  if (deepfakeScore > 50 && deepfakeScore <= 70) {
+  } else if (deepfakeScore > 50) {
     indicators.push('Moderate signs of potential video manipulation');
   }
-  if (sentimentScores.negative > 60) {
+  if (sentiment && sentiment.negative > 60) {
     indicators.push('High negative sentiment detected in speech content');
-  }
-  if (Math.random() > 0.7) { // Simulated detection
-    indicators.push('Inconsistent frame transitions detected');
-  }
-  if (Math.random() > 0.8) { // Simulated detection
-    indicators.push('Audio-video synchronization anomalies found');
   }
 
   return indicators;
 };
 
+// SHA-256 of the original file, so a report can be tied to the exact video analysed
+const hashFile = async (file: File): Promise<string | null> => {
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+  } catch (error) {
+    console.error('Could not hash video:', error); // crypto.subtle needs HTTPS or localhost
+    return null;
+  }
+};
+
 // Main processing function
-export const processVideo = async (videoId: string, videoPath: string, userId: string) => {
+export const processVideo = async (videoId: string, file: File, userId: string, retentionDays: number) => {
+  // The video is analysed in the browser straight from the selected file (nothing is stored)
+  const videoUrl = URL.createObjectURL(file);
+  const startedAt = Date.now();
+
   try {
     toast('Starting AI analysis...', { icon: '🔍' });
 
-    // Get video URL
-    const videoUrl = supabase.storage.from('videos').getPublicUrl(videoPath).data.publicUrl;
-
-    // Extract frames
     toast('Extracting video frames...', { icon: '🎬' });
     const frames = await extractFrames(videoUrl);
+    if (frames.length === 0) {
+      throw new Error('Could not read frames from this video. The file may be corrupt or use an unsupported codec.');
+    }
 
-    // Analyze for deepfakes
-    toast('Analyzing for deepfakes...', { icon: '🤖' });
-    const deepfakeScore = await analyzeFramesForDeepfake(frames);
+    toast('Analyzing for deepfakes (AI models download on first use)...', { icon: '🤖' });
+    let deepfakeScore = await analyzeFramesForDeepfake(frames);
 
-    // Extract transcript
     toast('Extracting speech content...', { icon: '🎤' });
-    const transcript = await extractTranscript(videoUrl);
+    let transcript = await extractTranscript(file);
 
-    // Analyze sentiment
     toast('Analyzing sentiment...', { icon: '💭' });
-    const sentimentScores = await analyzeSentiment(transcript);
+    let sentiment = transcript ? await analyzeSentiment(transcript) : null;
 
-    // Detect tampering
-    const tamperingIndicators = detectTamperingIndicators(deepfakeScore, sentimentScores);
+    let demoData = false;
+    if (deepfakeScore === null) {
+      if (!DEMO_MODE) {
+        throw new Error(
+          'The AI models could not run. Check your internet connection (they download on first use) and try again.'
+        );
+      }
+      demoData = true;
+      deepfakeScore = 15;
+      transcript = 'Demo transcript: placeholder text, not from this video.';
+      sentiment = { positive: 60, negative: 10, neutral: 30 };
+      toast('AI models unavailable: showing demo data', { icon: '⚠️' });
+    }
 
-    // Calculate overall authenticity score
-    const authenticityScore = Math.round(
-      (100 - deepfakeScore) * 0.6 + // 60% weight on deepfake detection
-      (sentimentScores.positive / 100) * 20 + // 20% weight on positive sentiment
-      (tamperingIndicators.length === 0 ? 20 : 10) // 20% for no tampering indicators
+    const tamperingIndicators = detectTamperingIndicators(deepfakeScore, sentiment);
+
+    // Overall authenticity score (sentiment counts as neutral when there was no speech to analyse)
+    const authenticityScore = Math.min(
+      100,
+      Math.max(
+        0,
+        Math.round(
+          (100 - deepfakeScore) * 0.6 + // 60% weight on deepfake detection
+            ((sentiment ? sentiment.positive : 50) / 100) * 20 + // 20% weight on positive sentiment
+            (tamperingIndicators.length === 0 ? 20 : 10) // 20% for no tampering indicators
+        )
+      )
     );
 
-    // Save report to database
-    const { data: report, error } = await supabase
-      .from('verification_reports')
-      .insert({
-        video_id: videoId,
-        user_id: userId,
-        authenticity_score: authenticityScore,
-        deepfake_likelihood: deepfakeScore,
-        transcript: transcript,
-        sentiment_analysis: sentimentScores,
-        tampering_indicators: tamperingIndicators,
-        key_frames: frames.slice(0, 3), // Store first 3 frames
-        metadata: {
-          processing_date: new Date().toISOString(),
-          models_used: Object.values(MODELS)
-        }
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
+    const reportData = {
+      video_id: videoId,
+      user_id: userId,
+      authenticity_score: authenticityScore,
+      deepfake_likelihood: deepfakeScore,
+      transcript: transcript || '',
+      sentiment_analysis: sentiment,
+      tampering_indicators: tamperingIndicators,
+      key_frames: frames.slice(0, 3), // Store first 3 frames
+      metadata: {
+        processing_date: new Date().toISOString(),
+        processing_seconds: Math.round((Date.now() - startedAt) / 1000),
+        models_used: [MODELS.deepfake, ...(transcript ? [MODELS.whisper] : []), ...(sentiment ? [MODELS.sentiment] : [])],
+        video_sha256: await hashFile(file),
+        video_size: file.size,
+        demo_data: demoData
+      },
+      retention_days: retentionDays,
+      expires_at: expiryDate(retentionDays),
+      created_at: new Date().toISOString()
+    };
+    const reportRef = await addDoc(collection(db, COLLECTIONS.verificationReports), reportData);
+    const report = { id: reportRef.id, ...reportData };
 
     // Update video status
-    await supabase
-      .from('video_uploads')
-      .update({ status: 'completed' })
-      .eq('id', videoId);
+    await updateDoc(doc(db, COLLECTIONS.videoUploads, videoId), { status: 'completed' });
 
     toast.success('Video analysis complete!');
     return report;
   } catch (error: any) {
     console.error('Error processing video:', error);
-    
-    // Update video status to failed
-    await supabase
-      .from('video_uploads')
-      .update({ status: 'failed' })
-      .eq('id', videoId);
 
-    toast.error('Failed to process video');
-    throw error;
+    // Update video status to failed
+    await updateDoc(doc(db, COLLECTIONS.videoUploads, videoId), { status: 'failed' }).catch(() => {});
+
+    throw error; // the caller shows the error
+  } finally {
+    URL.revokeObjectURL(videoUrl);
   }
 };

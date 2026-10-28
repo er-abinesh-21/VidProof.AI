@@ -1,15 +1,15 @@
 # VidProof - AI-Powered Video Proof Verification Platform
 
-A modern web application for AI-powered video verification and authenticity analysis using React, Supabase, and Hugging Face AI models.
+A modern web application for AI-powered video verification and authenticity analysis using React, Firebase, and free open-source AI models that run in the browser.
 
 ![VidProof](https://img.shields.io/badge/VidProof-AI%20Video%20Verification-blue)
 ![React](https://img.shields.io/badge/React-18.2.0-61DAFB)
-![Supabase](https://img.shields.io/badge/Supabase-Backend-3ECF8E)
+![Firebase](https://img.shields.io/badge/Firebase-Backend-FFCA28)
 ![TypeScript](https://img.shields.io/badge/TypeScript-4.9.5-3178C6)
 
 ## 🚀 Features
 
-- **User Authentication**: Secure authentication with Supabase Auth (Email/Password)
+- **User Authentication**: Secure authentication with Firebase Auth (Email/Password and Google)
 - **Video Upload**: Support for MP4, MOV, and AVI formats (max 100MB)
 - **AI-Powered Analysis**:
   - Deepfake detection
@@ -24,15 +24,14 @@ A modern web application for AI-powered video verification and authenticity anal
 
 - **Frontend**: React 18 + TypeScript
 - **Styling**: Glassmorphism CSS with Tailwind-inspired utilities
-- **Backend**: Supabase (PostgreSQL, Auth, Storage, Edge Functions)
-- **AI Models**: Hugging Face Inference API
-- **Deployment**: Vercel (Frontend) + Supabase Cloud (Backend)
+- **Backend**: Firebase (Auth, Firestore); videos are analysed in the browser and not stored
+- **AI Models**: Free open-source models run locally in the browser via Transformers.js (no API key): `Deep-Fake-Detector-v2` (deepfake detection), `whisper-tiny` (speech-to-text), `distilbert-sst-2` (sentiment)
+- **Deployment**: Vercel (Frontend) + Firebase (Backend)
 
 ## 📋 Prerequisites
 
 - Node.js 16+ and npm/yarn
-- Supabase account
-- Hugging Face account with API key
+- Firebase project
 - Vercel account (for deployment)
 
 ## 🔧 Setup Instructions
@@ -50,33 +49,35 @@ cd vidproof
 npm install
 ```
 
-### 3. Configure Supabase
+### 3. Configure Firebase
 
-1. Create a new project at [supabase.com](https://supabase.com)
-2. Go to Settings → API to get your project URL and anon key
-3. Run the SQL schema in your Supabase SQL editor:
+1. Create a project in the [Firebase console](https://console.firebase.google.com)
+2. Add a Web app and copy its config values into `.env`
+3. Authentication → Sign-in method: enable **Email/Password** and **Google**
+4. Create a Firestore database
+5. Deploy the security rules:
 
-```sql
--- Copy contents from supabase/schema.sql
+```bash
+firebase deploy --only firestore:rules
 ```
 
-### 4. Configure Hugging Face
+6. Authentication → Settings → Authorized domains: add your Vercel domain
 
-1. Create an account at [huggingface.co](https://huggingface.co)
-2. Go to Settings → Access Tokens
-3. Create a new token with read permissions
+### 4. AI models
+
+Nothing to configure. The models (about 200MB in total) are downloaded from the Hugging Face Hub the first time a video is analysed, then cached by the browser. Analysis runs on the user's device, so videos are never uploaded anywhere.
 
 ### 5. Environment Variables
 
 Create a `.env` file in the root directory:
 
 ```env
-# Supabase Configuration
-REACT_APP_SUPABASE_URL=your_supabase_project_url
-REACT_APP_SUPABASE_ANON_KEY=your_supabase_anon_key
-
-# Hugging Face API
-REACT_APP_HUGGINGFACE_API_KEY=your_huggingface_api_key
+# Firebase Configuration
+REACT_APP_FIREBASE_API_KEY=your_firebase_api_key
+REACT_APP_FIREBASE_AUTH_DOMAIN=your_project_id.firebaseapp.com
+REACT_APP_FIREBASE_PROJECT_ID=your_project_id
+REACT_APP_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+REACT_APP_FIREBASE_APP_ID=your_app_id
 
 # App Configuration
 REACT_APP_MAX_FILE_SIZE=104857600
@@ -93,12 +94,7 @@ The app will be available at `http://localhost:3000`
 
 3. Set environment variables in Vercel dashboard
 
-### Configure Supabase
-
-Your Supabase project is already configured and hosted. Make sure to:
-1. Enable email confirmations in Authentication settings
-2. Configure storage policies if needed
-3. Set up custom domain (optional)
+Reports are kept for the period chosen at upload (90, 60, 30, 14 or 7 days). Expired documents are hidden immediately and deleted when the owner next signs in (Firestore TTL policies need the Blaze plan; if you upgrade, enable a TTL policy on `expires_at` for `video_uploads` and `verification_reports`).
 
 ## 📁 Project Structure
 
@@ -108,11 +104,11 @@ vidproof/
 ├── src/
 │   ├── components/      # React components
 │   ├── contexts/        # Context providers
-│   ├── lib/            # Supabase client
+│   ├── lib/            # Firebase client
 │   ├── pages/          # Page components
 │   ├── services/       # AI service integration
 │   └── styles/         # Global styles
-├── supabase/           # Database schema
+├── firestore.rules     # Firestore security rules
 ├── .env.example        # Environment variables template
 ├── package.json        # Dependencies
 └── README.md          # Documentation
@@ -153,4 +149,4 @@ For issues and questions, please create an issue in the GitHub repository.
 
 ---
 
-Built with ❤️ using React, Supabase, and Hugging Face AI
+Built with ❤️ using React, Firebase, and Transformers.js

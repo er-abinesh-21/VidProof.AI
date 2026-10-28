@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { FiMail, FiLock, FiUser, FiEye, FiEyeOff, FiCheck, FiShield } from 'react-icons/fi';
-import { FaGoogle, FaFacebook } from 'react-icons/fa';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { FiMail, FiLock, FiUser, FiEye, FiEyeOff, FiCheck } from 'react-icons/fi';
+import { FaGoogle } from 'react-icons/fa';
 import { useAuth } from '../contexts/AuthContext';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -14,8 +14,17 @@ const Register: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { signUp } = useAuth();
+  const { user, signUp, signInWithGoogle } = useAuth();
   const navigate = useNavigate();
+
+  const handleGoogle = async () => {
+    try {
+      await signInWithGoogle();
+      navigate('/');
+    } catch {
+      // AuthContext already shows the error toast
+    }
+  };
 
   const passwordRequirements = [
     { met: password.length >= 8, text: 'At least 8 characters' },
@@ -27,23 +36,28 @@ const Register: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (!passwordRequirements.every((r) => r.met)) {
+      toast.error('Password does not meet all requirements');
+      return;
+    }
+
     if (password !== confirmPassword) {
       toast.error('Passwords do not match');
       return;
     }
 
-
     setLoading(true);
     try {
-      await signUp(email, password);
-      toast.success('Account created successfully!');
-      navigate('/login');
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to create account');
+      await signUp(email, password, name.trim());
+      navigate('/'); // Firebase signs the new user in automatically
+    } catch {
+      // AuthContext already shows the error toast
     } finally {
       setLoading(false);
     }
   };
+
+  if (user) return <Navigate to="/" replace />;
 
   return (
     <div style={{
@@ -510,7 +524,7 @@ const Register: React.FC = () => {
                     type="button"
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
-                    onClick={() => toast('Google signup coming soon!', { icon: '🚀' })}
+                    onClick={handleGoogle}
                     style={{
                       flex: 1,
                       padding: '0.75rem',
@@ -537,36 +551,6 @@ const Register: React.FC = () => {
                     <span style={{ color: '#374151', fontWeight: '500' }}>Google</span>
                   </motion.button>
 
-                  <motion.button
-                    type="button"
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => toast('Facebook signup coming soon!', { icon: '🚀' })}
-                    style={{
-                      flex: 1,
-                      padding: '0.75rem',
-                      background: 'white',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '12px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '0.5rem',
-                      transition: 'all 0.2s'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = '#9333ea';
-                      e.currentTarget.style.background = '#faf5ff';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = '#e5e7eb';
-                      e.currentTarget.style.background = 'white';
-                    }}
-                  >
-                    <FaFacebook style={{ color: '#1877f2' }} />
-                    <span style={{ color: '#374151', fontWeight: '500' }}>Facebook</span>
-                  </motion.button>
                 </div>
 
                 <p style={{

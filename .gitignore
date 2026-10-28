@@ -29,6 +29,4 @@ yarn-error.log*
 *.swp
 *.swo
 
-# Supabase
-supabase/.env
-supabase/.env.local
+firebase-debug.log*

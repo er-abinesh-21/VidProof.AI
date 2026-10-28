@@ -1,12 +1,13 @@
 import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
-import { FiUploadCloud, FiFile, FiX, FiCheckCircle } from 'react-icons/fi';
+import { FiUploadCloud, FiFile, FiX } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import Navbar from '../components/Navbar';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, uploadVideo } from '../lib/supabase';
+import { addDoc, collection } from 'firebase/firestore';
+import { db, COLLECTIONS, RETENTION_OPTIONS, DEFAULT_RETENTION_DAYS, expiryDate } from '../lib/firebase';
 import { processVideo } from '../services/aiService';
 
 const MAX_FILE_SIZE = parseInt(process.env.REACT_APP_MAX_FILE_SIZE || '104857600'); // 100MB
@@ -19,12 +20,14 @@ const Upload: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [processing, setProcessing] = useState(false);
+  const [retentionDays, setRetentionDays] = useState<number>(DEFAULT_RETENTION_DAYS);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const uploadedFile = acceptedFiles[0];
-    
+    if (!uploadedFile) return; // every dropped file was rejected (handled in onDropRejected)
+
     if (uploadedFile.size > MAX_FILE_SIZE) {
-      toast.error('File size exceeds 100MB limit');
+      toast.error(`File size exceeds ${Math.round(MAX_FILE_SIZE / 1024 / 1024)}MB limit`);
       return;
     }
 
@@ -38,6 +41,16 @@ const Upload: React.FC = () => {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    onDropRejected: (rejections) => {
+      const code = rejections[0]?.errors[0]?.code;
+      toast.error(
+        code === 'file-too-large'
+          ? `File size exceeds ${Math.round(MAX_FILE_SIZE / 1024 / 1024)}MB limit`
+          : code === 'too-many-files'
+          ? 'Please upload one video at a time'
+          : 'Invalid file type. Please upload MP4, MOV, or AVI files.'
+      );
+    },
     accept: {
       'video/*': ['.mp4', '.mov', '.avi']
     },
@@ -52,35 +65,31 @@ const Upload: React.FC = () => {
     setUploadProgress(0);
 
     try {
-      // Upload to Supabase Storage
-      const uploadData = await uploadVideo(file, user.id);
-      setUploadProgress(50);
+      setUploadProgress(25);
 
-      // Create database entry
-      const { data: videoData, error: dbError } = await supabase
-        .from('video_uploads')
-        .insert({
-          user_id: user.id,
-          filename: file.name,
-          file_url: uploadData.path,
-          file_size: file.size,
-          status: 'processing'
-        })
-        .select()
-        .single();
-
-      if (dbError) throw dbError;
+      // Create database entry (metadata only; the video itself is not stored)
+      const now = new Date().toISOString();
+      const videoRef = await addDoc(collection(db, COLLECTIONS.videoUploads), {
+        user_id: user.uid,
+        filename: file.name,
+        file_size: file.size,
+        upload_date: now,
+        status: 'processing',
+        retention_days: retentionDays,
+        expires_at: expiryDate(retentionDays),
+        created_at: now
+      });
+      const videoData = { id: videoRef.id };
       setUploadProgress(75);
 
       // Process with AI
       setProcessing(true);
-      toast.success('Video uploaded! Processing with AI...');
+      toast.success('Video received! Processing with AI...');
       
       // Call AI processing service
-      const report = await processVideo(videoData.id, uploadData.path, user.id);
+      const report = await processVideo(videoData.id, file, user.uid, retentionDays);
       
       setUploadProgress(100);
-      toast.success('Video verification complete!');
       
       // Navigate to report
       navigate(`/report/${report.id}`);
@@ -285,6 +294,39 @@ const Upload: React.FC = () => {
                     ))}
                   </div>
 
+                  <div style={{ marginBottom: '2rem' }}>
+                    <label
+                      htmlFor="retention"
+                      style={{ display: 'block', fontSize: '0.875rem', color: '#94a3b8', marginBottom: '0.5rem' }}
+                    >
+                      Keep this report for
+                    </label>
+                    <select
+                      id="retention"
+                      value={retentionDays}
+                      onChange={(e) => setRetentionDays(Number(e.target.value))}
+                      disabled={uploading || processing}
+                      style={{
+                        width: '100%',
+                        padding: '0.875rem 1rem',
+                        borderRadius: '12px',
+                        background: 'rgba(255, 255, 255, 0.05)',
+                        border: '1px solid rgba(255, 255, 255, 0.15)',
+                        color: '#e2e8f0',
+                        fontSize: '1rem'
+                      }}
+                    >
+                      {RETENTION_OPTIONS.map((days) => (
+                        <option key={days} value={days} style={{ color: '#1a1a1a' }}>
+                          {days} days
+                        </option>
+                      ))}
+                    </select>
+                    <p style={{ fontSize: '0.8125rem', color: '#64748b', marginTop: '0.5rem' }}>
+                      The report is permanently deleted automatically after this period.
+                    </p>
+                  </div>
+
                   <motion.button
                     onClick={handleUpload}
                     disabled={uploading || processing}
@@ -350,8 +392,8 @@ const Upload: React.FC = () => {
                   '• Maximum file size: 100MB',
                   '• Supported formats: MP4, MOV, AVI',
                   '• Processing time depends on video length and quality',
-                  '• All uploads are encrypted and stored securely',
-                  '• Reports are generated automatically after processing'
+                  '• Videos are analysed in your browser and are never stored',
+                  '• Reports are kept for the period you choose, then deleted'
                 ].map((note, index) => (
                   <motion.li
                     key={index}

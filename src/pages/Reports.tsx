@@ -8,7 +8,8 @@ import jsPDF from 'jspdf';
 import toast from 'react-hot-toast';
 import Navbar from '../components/Navbar';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase, VerificationReport } from '../lib/supabase';
+import { collection, deleteDoc, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
+import { db, COLLECTIONS, isExpired, VerificationReport } from '../lib/firebase';
 
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement);
 
@@ -23,50 +24,41 @@ const Reports: React.FC = () => {
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    if (id) {
-      fetchReport(id);
-    } else {
-      fetchReports();
-    }
-  }, [id, user]);
-
-  const fetchReports = async () => {
     if (!user) return;
+    let cancelled = false;
+    setLoading(true);
+    setSelectedReport(null);
 
-    try {
-      const { data, error } = await supabase
-        .from('verification_reports')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
+    const load = async () => {
+      try {
+        if (id) {
+          const snap = await getDoc(doc(db, COLLECTIONS.verificationReports, id));
+          const report = snap.exists() ? ({ id: snap.id, ...snap.data() } as VerificationReport) : null;
+          if (!cancelled && report && !isExpired(report)) setSelectedReport(report);
+        } else {
+          // Sorted client-side to avoid requiring a composite Firestore index
+          const snap = await getDocs(
+            query(collection(db, COLLECTIONS.verificationReports), where('user_id', '==', user.uid))
+          );
+          const data = snap.docs
+            .map(d => ({ id: d.id, ...d.data() } as VerificationReport))
+            .filter(r => !isExpired(r));
+          data.sort((a, b) => b.created_at.localeCompare(a.created_at));
+          if (!cancelled) setReports(data);
+        }
+      } catch (error) {
+        console.error('Error loading reports:', error);
+        if (!cancelled) toast.error(id ? 'Failed to load report' : 'Failed to load reports');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
 
-      if (error) throw error;
-      setReports(data || []);
-    } catch (error) {
-      console.error('Error fetching reports:', error);
-      toast.error('Failed to load reports');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchReport = async (reportId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('verification_reports')
-        .select('*')
-        .eq('id', reportId)
-        .single();
-
-      if (error) throw error;
-      setSelectedReport(data);
-    } catch (error) {
-      console.error('Error fetching report:', error);
-      toast.error('Failed to load report');
-    } finally {
-      setLoading(false);
-    }
-  };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, user]);
 
   const handleDeleteClick = (e: React.MouseEvent, reportId: string) => {
     e.preventDefault();
@@ -83,36 +75,16 @@ const Reports: React.FC = () => {
 
     setDeleting(true);
     try {
-      console.log('Attempting to delete report:', reportToDelete);
-      console.log('User ID:', user.id);
-      
-      // First, let's verify the report exists and belongs to the user
-      const { data: reportCheck, error: checkError } = await supabase
-        .from('verification_reports')
-        .select('*')
-        .eq('id', reportToDelete)
-        .single();
-      
-      console.log('Report check:', { reportCheck, checkError });
-      
-      if (checkError || !reportCheck) {
-        console.error('Report not found or error checking:', checkError);
-        toast.error('Report not found');
-        return;
-      }
-      
-      // Now attempt to delete
-      const { error } = await supabase
-        .from('verification_reports')
-        .delete()
-        .eq('id', reportToDelete);
-
-      console.log('Delete error (if any):', error);
-
-      if (error) {
-        console.error('Supabase delete error:', error);
-        // If error contains RLS policy message, provide more helpful feedback
-        if (error.message?.includes('policy')) {
+      try {
+        await deleteDoc(doc(db, COLLECTIONS.verificationReports, reportToDelete));
+        const videoId = reports.find(r => r.id === reportToDelete)?.video_id;
+        if (videoId) {
+          // Best effort: don't leave the upload record behind (and counted on the dashboard)
+          await deleteDoc(doc(db, COLLECTIONS.videoUploads, videoId)).catch(() => {});
+        }
+      } catch (error: any) {
+        console.error('Firestore delete error:', error);
+        if (error.code === 'permission-denied') {
           toast.error('Permission denied. Please refresh the page and try again.');
         } else {
           toast.error(error.message || 'Failed to delete report');
@@ -125,9 +97,6 @@ const Reports: React.FC = () => {
       setReports(reports.filter(r => r.id !== reportToDelete));
       setDeleteModalOpen(false);
       setReportToDelete(null);
-      
-      // Optionally refresh the reports list to ensure consistency
-      fetchReports();
     } catch (error: any) {
       console.error('Error deleting report:', error);
       toast.error(error.message || 'Failed to delete report');
@@ -476,18 +445,19 @@ const Reports: React.FC = () => {
     currentY += 18;
     
     doc.setFillColor(20, 20, 35);
-    doc.roundedRect(margin, currentY - 5, contentWidth, 50, 4, 4, 'F');
+    doc.roundedRect(margin, currentY - 5, contentWidth, 60, 4, 4, 'F');
     
     // Add subtle border
     doc.setDrawColor(129, 140, 248, 0.2);
     doc.setLineWidth(0.3);
-    doc.roundedRect(margin, currentY - 5, contentWidth, 50, 4, 4, 'S');
+    doc.roundedRect(margin, currentY - 5, contentWidth, 60, 4, 4, 'S');
     
     const details = [
       `Analysis Engine: VidProof AI v2.0`,
       `Processing Date: ${new Date(report.created_at).toLocaleString()}`,
       `Report ID: ${report.id}`,
-      `Video Hash: ${'SHA256:' + report.id.slice(0, 16) + '...'}`
+      `Video SHA-256: ${report.metadata?.video_sha256 || 'Not available'}`,
+      ...(report.metadata?.demo_data ? ['DEMO DATA: placeholder values, not a real analysis'] : [])
     ];
     
     doc.setFont('helvetica', 'normal');
@@ -511,7 +481,7 @@ const Reports: React.FC = () => {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184);
-      doc.text('© 2024 VidProof - AI-Powered Video Verification System', margin, pageHeight - 13);
+      doc.text(`© ${new Date().getFullYear()} VidProof - AI-Powered Video Verification System`, margin, pageHeight - 13);
       doc.text('This report is confidential and for authorized use only', margin, pageHeight - 6);
       
       // Page number - properly aligned
@@ -542,12 +512,6 @@ const Reports: React.FC = () => {
     });
   };
 
-  const getScoreColor = (score: number) => {
-    if (score >= 70) return 'text-green-400';
-    if (score >= 40) return 'text-yellow-400';
-    return 'text-red-400';
-  };
-
   const getScoreLabel = (score: number) => {
     if (score >= 70) return 'High Authenticity';
     if (score >= 40) return 'Medium Authenticity';
@@ -573,7 +537,24 @@ const Reports: React.FC = () => {
 
   if (selectedReport || id) {
     const report = selectedReport;
-    if (!report) return null;
+    if (!report) {
+      return (
+        <div className="min-h-screen" style={{ background: 'linear-gradient(135deg, #0f0f1e 0%, #1a1a2e 100%)' }}>
+          <Navbar />
+          <div className="flex items-center justify-center" style={{ minHeight: 'calc(100vh - 80px)' }}>
+            <div className="text-center">
+              <p style={{ fontSize: '1.25rem', color: '#e2e8f0', marginBottom: '0.5rem' }}>Report not found</p>
+              <p style={{ color: '#94a3b8', marginBottom: '1.5rem' }}>
+                It may have been deleted or passed its retention period.
+              </p>
+              <Link to="/reports" style={{ color: '#818cf8', textDecoration: 'none', fontWeight: '600' }}>
+                Back to Reports
+              </Link>
+            </div>
+          </div>
+        </div>
+      );
+    }
 
     const authenticityData = {
       labels: ['Authentic', 'Suspicious'],
@@ -688,6 +669,19 @@ const Reports: React.FC = () => {
                 backgroundClip: 'text'
               }}>Verification Report</h1>
               <p style={{ color: '#94a3b8' }}>Report ID: {report.id.slice(0, 8)}</p>
+              {report.metadata?.demo_data && (
+                <p style={{
+                  marginTop: '1rem',
+                  padding: '0.75rem 1rem',
+                  borderRadius: '12px',
+                  background: 'rgba(251, 191, 36, 0.1)',
+                  border: '1px solid rgba(251, 191, 36, 0.3)',
+                  color: '#fbbf24',
+                  fontSize: '0.9rem'
+                }}>
+                  Demo data: the AI service was unavailable, so these values are placeholders and not a real analysis.
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3" style={{ gap: '2rem' }}>
@@ -1100,10 +1094,15 @@ const Reports: React.FC = () => {
                             alignItems: 'center',
                             justifyContent: 'center',
                             border: '1px solid rgba(96, 165, 250, 0.3)',
+                            overflow: 'hidden',
                             cursor: 'pointer'
                           }}
                         >
-                          <FiImage style={{ color: '#60a5fa', fontSize: '1.5rem' }} />
+                          <img
+                            src={frame}
+                            alt={`Key frame ${index + 1}`}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '8px' }}
+                          />
                         </motion.div>
                       ))}
                     </div>
