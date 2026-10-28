@@ -1,0 +1,229 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+/* The drop area is a viewfinder: brackets close in when a file is dragged over it */
+.viewfinder {
+  --inset: 14px;
+  position: relative;
+  aspect-ratio: 16 / 9;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-panel);
+  background: var(--sheet);
+  border: 1px dashed var(--rule-strong);
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.viewfinder:hover:not(.hasFile),
+.dragging {
+  background: rgba(198, 143, 89, 0.07);
+  border-color: var(--accent);
+}
+
+.dragging {
+  --inset: 26px;
+}
+
+.hasFile {
+  background: var(--film);
+  border: 0;
+  cursor: default;
+}
+
+.corner {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border: 0 solid var(--ink);
+  transition: top 0.25s var(--ease-out), right 0.25s var(--ease-out), bottom 0.25s var(--ease-out), left 0.25s var(--ease-out), border-color 0.2s ease;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.dragging .corner {
+  border-color: var(--accent);
+}
+
+.hasFile .corner {
+  display: none;
+}
+
+.tl { top: var(--inset); left: var(--inset); border-top-width: 3px; border-left-width: 3px; }
+.tr { top: var(--inset); right: var(--inset); border-top-width: 3px; border-right-width: 3px; }
+.br { bottom: var(--inset); right: var(--inset); border-bottom-width: 3px; border-right-width: 3px; }
+.bl { bottom: var(--inset); left: var(--inset); border-bottom-width: 3px; border-left-width: 3px; }
+
+.prompt {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  text-align: center;
+  padding: 24px;
+}
+
+.promptTitle {
+  font-size: var(--t-xl);
+  font-family: var(--font-display);
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.touchCopy {
+  display: none;
+}
+
+/* Nobody drags files on a phone */
+@media (hover: none) and (pointer: coarse) {
+  .pointerCopy {
+    display: none;
+  }
+
+  .touchCopy {
+    display: inline;
+  }
+}
+
+.promptText {
+  color: var(--ink-3);
+  margin-bottom: 14px;
+}
+
+.preview {
+  width: 100%;
+  height: 100%;
+  border-radius: var(--r-panel);
+  background: var(--film);
+  object-fit: contain;
+}
+
+/* Side column */
+.side {
+  display: grid;
+  gap: 28px;
+}
+
+.side h2 {
+  font-size: var(--t-base);
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.privacy {
+  color: var(--ink-2);
+  max-width: 40ch;
+}
+
+.fileInfo {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
+.fileName {
+  font-size: var(--t-lg);
+  font-weight: 700;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.fileMeta {
+  display: flex;
+  gap: 28px;
+}
+
+.fileMeta dt {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.fileMeta dd {
+  font-weight: 600;
+}
+
+.change {
+  margin-left: -18px;
+}
+
+.retention {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding-top: 24px;
+  border-top: 1px solid var(--rule);
+}
+
+.retention h2 {
+  margin-bottom: 4px;
+}
+
+.start {
+  min-height: 52px;
+  font-size: var(--t-base);
+}
+
+/* Error banner */
+.error {
+  overflow: hidden;
+}
+
+.errorInner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 14px 16px;
+  border-radius: var(--r-control);
+  background: var(--flagged-tint);
+  color: var(--ink);
+}
+
+.errorInner > svg {
+  flex-shrink: 0;
+  color: var(--flagged);
+}
+
+.errorInner p {
+  flex: 1;
+}
+
+/* Analysis progress */
+.ribbon {
+  margin-top: 32px;
+}
+
+.hint {
+  margin-top: 16px;
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+}
+
+/* Explainer under the form */
+.how {
+  margin-top: 56px;
+}
+
+.how h2 {
+  font-family: var(--font-display);
+  font-size: var(--t-xl);
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  margin-bottom: 18px;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .viewfinder:not(.hasFile) {
+    aspect-ratio: 4 / 3;
+  }
+}

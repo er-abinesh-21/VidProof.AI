@@ -1,0 +1,144 @@
+.form {
+  display: grid;
+  gap: 18px;
+}
+
+.google {
+  width: 100%;
+  min-height: 48px;
+}
+
+.googleMark {
+  width: 18px;
+  height: 18px;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 24px 0;
+  font-size: var(--t-sm);
+  color: var(--ink-3);
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+}
+
+.labelRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.smallLink {
+  font-size: var(--t-sm);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.smallLink:hover {
+  text-decoration: underline;
+}
+
+/* Password input with an inline show/hide control */
+.passwordWrap {
+  position: relative;
+}
+
+.passwordWrap input {
+  padding-right: 64px;
+}
+
+.reveal {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.reveal:hover {
+  background: var(--sheet);
+  color: var(--ink);
+}
+
+.submit {
+  margin-top: 6px;
+  min-height: 48px;
+}
+
+/* Password requirements tick off as they are met */
+.requirements {
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+  margin-top: 4px;
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+.requirement {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.2s ease;
+}
+
+.tick {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--rule-strong);
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.met {
+  color: var(--authentic);
+}
+
+.met .tick {
+  background: var(--authentic);
+  border-color: var(--authentic);
+  color: var(--on-action);
+}
+
+.error {
+  font-size: var(--t-xs);
+  color: var(--flagged);
+}
+
+.sent {
+  padding: 20px;
+  border-radius: var(--r-control);
+  background: var(--authentic-tint);
+  color: var(--ink);
+}
+
+.sent strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--authentic);
+}
+
+@media (max-width: 380px) {
+  .requirements {
+    grid-template-columns: 1fr;
+  }
+}

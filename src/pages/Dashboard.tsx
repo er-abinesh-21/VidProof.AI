@@ -1,659 +1,259 @@
-import React, { useEffect, useState } from 'react';
-import { motion } from 'framer-motion';
-import { FiUpload, FiFileText, FiTrendingUp, FiClock, FiCheckCircle, FiVideo } from 'react-icons/fi';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import { FiPlus } from 'react-icons/fi';
+import { Line } from 'react-chartjs-2';
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler } from 'chart.js';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import toast from 'react-hot-toast';
-import { db, COLLECTIONS, isExpired, VerificationReport, VideoUpload } from '../lib/firebase';
-import Navbar from '../components/Navbar';
 import { useAuth } from '../contexts/AuthContext';
-import { Line, Doughnut } from 'react-chartjs-2';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler,
-  ArcElement
-} from 'chart.js';
+import { db, COLLECTIONS, isExpired, VerificationReport, VideoUpload } from '../lib/firebase';
+import { VERDICT_LABEL, Verdict, verdictFor } from '../lib/verdict';
+import ReportRow from '../components/ReportRow';
+import styles from './Dashboard.module.css';
 
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-  Filler,
-  ArcElement
-);
-
-interface Stats {
-  totalUploads: number;
-  uploadsThisWeek: number;
-  verifiedVideos: number;
-  averageScore: number;
-  recentReports: number;
-  pendingAnalysis: number;
-  flaggedContent: number;
-  processingTime: number;
-  hasReports: boolean;
-}
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const VERDICTS: Verdict[] = ['authentic', 'review', 'flagged'];
+const VERDICT_COLOR: Record<Verdict, string> = { authentic: '#8fc28a', review: '#e9c46a', flagged: '#e5675c' };
 
-const EMPTY_STATS: Stats = {
-  totalUploads: 0,
-  uploadsThisWeek: 0,
-  verifiedVideos: 0,
-  averageScore: 0,
-  recentReports: 0,
-  pendingAnalysis: 0,
-  flaggedContent: 0,
-  processingTime: 0,
-  hasReports: false
+const greeting = () => {
+  const hour = new Date().getHours();
+  return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
 };
 
-const average = (values: number[]) =>
-  values.length > 0 ? values.reduce((acc, v) => acc + v, 0) / values.length : 0;
-
-// Last 7 calendar days (oldest first) with the average authenticity score and deepfake risk of reports made that day
-const buildWeeklySeries = (reports: VerificationReport[]) => {
+// Last 7 calendar days (oldest first) with the average score of reports made that day
+const buildWeek = (reports: VerificationReport[]) => {
   const days = Array.from({ length: 7 }, (_, i) => {
     const date = new Date();
     date.setHours(0, 0, 0, 0);
     date.setDate(date.getDate() - (6 - i));
     return date;
   });
-
-  const labels = days.map(d => d.toLocaleDateString(undefined, { weekday: 'short' }));
-  const authenticity: (number | null)[] = [];
-  const deepfake: (number | null)[] = [];
-
-  days.forEach(day => {
-    const start = day.getTime();
-    const dayReports = reports.filter(r => {
-      const created = new Date(r.created_at).getTime();
-      return created >= start && created < start + DAY_MS;
-    });
-    authenticity.push(dayReports.length ? Math.round(average(dayReports.map(r => r.authenticity_score))) : null);
-    deepfake.push(dayReports.length ? Math.round(average(dayReports.map(r => r.deepfake_likelihood))) : null);
-  });
-
-  return { labels, authenticity, deepfake };
+  return {
+    labels: days.map((d) => d.toLocaleDateString(undefined, { weekday: 'short' })),
+    values: days.map((day) => {
+      const start = day.getTime();
+      const dayScores = reports
+        .filter((r) => {
+          const created = new Date(r.created_at).getTime();
+          return created >= start && created < start + DAY_MS;
+        })
+        .map((r) => r.authenticity_score);
+      return dayScores.length ? Math.round(dayScores.reduce((a, b) => a + b, 0) / dayScores.length) : null;
+    })
+  };
 };
 
 const Dashboard: React.FC = () => {
   const { user } = useAuth();
-  const [stats, setStats] = useState<Stats>(EMPTY_STATS);
-  const [weekly, setWeekly] = useState(() => buildWeeklySeries([]));
-  const [loading, setLoading] = useState(true);
+  const [reports, setReports] = useState<VerificationReport[] | null>(null);
+  const [uploads, setUploads] = useState<VideoUpload[]>([]);
 
   useEffect(() => {
-    fetchStats();
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const fetchStats = async () => {
     if (!user) return;
-    setLoading(true);
+    let cancelled = false;
 
-    try {
-      const [uploadsSnap, reportsSnap] = await Promise.all([
-        getDocs(query(collection(db, COLLECTIONS.videoUploads), where('user_id', '==', user.uid))),
-        getDocs(query(collection(db, COLLECTIONS.verificationReports), where('user_id', '==', user.uid)))
-      ]);
-      const uploads = uploadsSnap.docs
-        .map(d => ({ id: d.id, ...d.data() } as VideoUpload))
-        .filter(u => !isExpired(u));
-      const reports = reportsSnap.docs
-        .map(d => ({ id: d.id, ...d.data() } as VerificationReport))
-        .filter(r => !isExpired(r));
-
-      const weekAgo = Date.now() - 7 * DAY_MS;
-      const processingTimes = reports
-        .map(r => r.metadata?.processing_seconds)
-        .filter((t): t is number => typeof t === 'number');
-
-      setStats({
-        totalUploads: uploads.length,
-        uploadsThisWeek: uploads.filter(u => new Date(u.created_at).getTime() >= weekAgo).length,
-        verifiedVideos: reports.filter(r => r.authenticity_score >= 70).length,
-        averageScore: Math.round(average(reports.map(r => r.authenticity_score))),
-        recentReports: reports.length,
-        pendingAnalysis: uploads.filter(u => u.status === 'pending' || u.status === 'processing').length,
-        flaggedContent: reports.filter(r => r.authenticity_score < 50).length,
-        processingTime: Math.round(average(processingTimes)),
-        hasReports: reports.length > 0
-      });
-      setWeekly(buildWeeklySeries(reports));
-    } catch (error) {
-      console.error('Error fetching stats:', error);
-      toast.error('Failed to load dashboard data');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const chartData = {
-    labels: weekly.labels,
-    datasets: [
-      {
-        label: 'Authenticity Score',
-        data: weekly.authenticity,
-        spanGaps: true,
-        fill: true,
-        backgroundColor: 'rgba(129, 140, 248, 0.1)',
-        borderColor: '#818cf8',
-        borderWidth: 2,
-        tension: 0.4,
-        pointRadius: 4,
-        pointBackgroundColor: '#818cf8',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2
-      },
-      {
-        label: 'Deepfake Risk',
-        data: weekly.deepfake,
-        spanGaps: true,
-        fill: false,
-        borderColor: '#f87171',
-        borderWidth: 2,
-        tension: 0.4,
-        pointRadius: 4,
-        pointBackgroundColor: '#f87171',
-        pointBorderColor: '#fff',
-        pointBorderWidth: 2
-      }
-    ]
-  };
-
-  const doughnutData = {
-    labels: ['Verified', 'Pending', 'Flagged'],
-    datasets: [
-      {
-        data: [stats.verifiedVideos, stats.pendingAnalysis, stats.flaggedContent],
-        backgroundColor: [
-          'rgba(52, 211, 153, 0.8)',
-          'rgba(251, 191, 36, 0.8)',
-          'rgba(239, 68, 68, 0.8)'
-        ],
-        borderColor: [
-          'rgba(52, 211, 153, 1)',
-          'rgba(251, 191, 36, 1)',
-          'rgba(239, 68, 68, 1)'
-        ],
-        borderWidth: 2
-      }
-    ]
-  };
-
-  const chartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        display: true,
-        position: 'top' as const,
-        labels: {
-          color: 'rgba(255, 255, 255, 0.7)',
-          padding: 15,
-          font: {
-            size: 12
-          }
-        }
-      },
-      tooltip: {
-        backgroundColor: 'rgba(0, 0, 0, 0.8)',
-        padding: 12,
-        borderRadius: 8,
-        titleColor: '#fff',
-        bodyColor: '#fff',
-        borderColor: 'rgba(255, 255, 255, 0.1)',
-        borderWidth: 1
-      }
-    },
-    scales: {
-      x: {
-        grid: {
-          color: 'rgba(255, 255, 255, 0.05)',
-          borderColor: 'rgba(255, 255, 255, 0.1)'
-        },
-        ticks: {
-          color: 'rgba(255, 255, 255, 0.5)'
-        }
-      },
-      y: {
-        grid: {
-          color: 'rgba(255, 255, 255, 0.05)',
-          borderColor: 'rgba(255, 255, 255, 0.1)'
-        },
-        ticks: {
-          color: 'rgba(255, 255, 255, 0.5)'
+    (async () => {
+      try {
+        const [uploadsSnap, reportsSnap] = await Promise.all([
+          getDocs(query(collection(db, COLLECTIONS.videoUploads), where('user_id', '==', user.uid))),
+          getDocs(query(collection(db, COLLECTIONS.verificationReports), where('user_id', '==', user.uid)))
+        ]);
+        if (cancelled) return;
+        setUploads(
+          uploadsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as VideoUpload)).filter((u) => !isExpired(u))
+        );
+        setReports(
+          reportsSnap.docs
+            .map((d) => ({ id: d.id, ...d.data() } as VerificationReport))
+            .filter((r) => !isExpired(r))
+            .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        );
+      } catch (error) {
+        console.error('Error loading overview:', error);
+        if (!cancelled) {
+          toast.error('Couldn’t load your reports. Check your connection and refresh.');
+          setReports([]);
         }
       }
-    }
-  };
+    })();
 
-  const doughnutOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        display: true,
-        position: 'bottom' as const,
-        labels: {
-          color: 'rgba(255, 255, 255, 0.7)',
-          padding: 15,
-          font: {
-            size: 12
-          }
-        }
-      },
-      tooltip: {
-        backgroundColor: 'rgba(0, 0, 0, 0.8)',
-        padding: 12,
-        borderRadius: 8,
-        titleColor: '#fff',
-        bodyColor: '#fff',
-        borderColor: 'rgba(255, 255, 255, 0.1)',
-        borderWidth: 1
-      }
-    }
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
-  // Helper functions for future activity feed implementation
-  // const getActivityIcon = (type: string) => {
-  //   switch (type) {
-  //     case 'upload':
-  //       return <FiUpload />;
-  //     case 'verification':
-  //       return <FiCheckCircle />;
-  //     case 'report':
-  //       return <FiFileText />;
-  //     default:
-  //       return <FiActivity />;
-  //   }
-  // };
+  const counts = useMemo(() => {
+    const result: Record<Verdict, number> = { authentic: 0, review: 0, flagged: 0 };
+    (reports || []).forEach((r) => result[verdictFor(r.authenticity_score)]++);
+    return result;
+  }, [reports]);
 
-  // const getStatusColor = (status: string) => {
-  //   switch (status) {
-  //     case 'success':
-  //       return '#34d399';
-  //     case 'warning':
-  //       return '#fbbf24';
-  //     case 'pending':
-  //       return '#818cf8';
-  //     default:
-  //       return '#94a3b8';
-  //   }
-  // };
+  const week = useMemo(() => buildWeek(reports || []), [reports]);
+  const unfinished = uploads.filter((u) => u.status === 'processing' || u.status === 'failed').length;
 
-  if (loading) {
+  if (!reports) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-indigo-500 border-t-transparent"></div>
-          <p className="mt-4 text-gray-400">Loading dashboard...</p>
-        </div>
+      <div className="page-loader" role="status">
+        <span className="spinner" aria-hidden="true" />
+        <span className="visually-hidden">Loading your overview</span>
       </div>
     );
   }
 
+  const name = user?.displayName?.split(' ')[0] || user?.email?.split('@')[0] || '';
+  const needsLook = counts.review + counts.flagged;
+  const lede =
+    reports.length === 0
+      ? 'Verify your first video and its report will appear here.'
+      : `You have ${reports.length} ${reports.length === 1 ? 'report' : 'reports'}. ${
+          needsLook === 0 ? 'None need a closer look.' : `${needsLook} ${needsLook === 1 ? 'needs' : 'need'} a closer look.`
+        }`;
+  const hasWeekData = week.values.some((v) => v !== null);
+
   return (
-    <>
-    <Navbar />
-    <div className="min-h-screen" style={{ 
-      background: 'linear-gradient(135deg, #0f0f1e 0%, #1a1a2e 100%)',
-      position: 'relative',
-      overflow: 'hidden'
-    }}>
-      {/* Animated Background */}
-      <div style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        pointerEvents: 'none',
-        zIndex: 0
-      }}>
-        <div style={{
-          position: 'absolute',
-          top: '-50%',
-          left: '-50%',
-          width: '200%',
-          height: '200%',
-          background: 'radial-gradient(circle at 20% 50%, rgba(129, 140, 248, 0.15) 0%, transparent 50%)',
-          animation: 'float 20s ease-in-out infinite'
-        }} />
-        <div style={{
-          position: 'absolute',
-          top: '-50%',
-          left: '-50%',
-          width: '200%',
-          height: '200%',
-          background: 'radial-gradient(circle at 80% 80%, rgba(167, 139, 250, 0.15) 0%, transparent 50%)',
-          animation: 'float 25s ease-in-out infinite reverse'
-        }} />
-      </div>
-
-      <div className="relative z-10" style={{ padding: '2rem 3rem' }}>
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          style={{ marginBottom: '3rem', paddingBottom: '1rem', borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}
-        >
-          <h1 style={{ 
-            fontSize: '3rem', 
-            fontWeight: '700', 
-            marginBottom: '0.5rem',
-            background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            backgroundClip: 'text'
-          }}>Welcome back, {user?.email?.split('@')[0]}!</h1>
-          <p style={{ color: '#94a3b8', fontSize: '1.125rem' }}>Here's your video verification dashboard overview</p>
-        </motion.div>
-
-        {/* Main Stats Grid */}
-        <div style={{ 
-          display: 'grid', 
-          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', 
-          gap: '2rem', 
-          marginBottom: '3rem',
-          padding: '0 0.5rem'
-        }}>
-          {/* Total Uploads Card */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.1 }}
-            whileHover={{ scale: 1.02, transition: { duration: 0.2 } }}
-            style={{
-              background: 'linear-gradient(135deg, rgba(129, 140, 248, 0.1) 0%, rgba(129, 140, 248, 0.05) 100%)',
-              backdropFilter: 'blur(20px) saturate(200%)',
-              WebkitBackdropFilter: 'blur(20px) saturate(200%)',
-              border: '1px solid rgba(129, 140, 248, 0.2)',
-              borderRadius: '24px',
-              padding: '2.5rem',
-              boxShadow: '0 20px 40px -15px rgba(0, 0, 0, 0.3)',
-              position: 'relative',
-              overflow: 'hidden'
-            }}
-          >
-            <div style={{ position: 'relative', zIndex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                <FiVideo style={{ fontSize: '2.5rem', color: '#818cf8' }} />
-                <span style={{ 
-                  padding: '0.25rem 0.75rem', 
-                  background: 'rgba(129, 140, 248, 0.2)', 
-                  borderRadius: '12px',
-                  fontSize: '0.75rem',
-                  color: '#818cf8',
-                  fontWeight: '600'
-                }}>{stats.uploadsThisWeek} this week</span>
-              </div>
-              <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginBottom: '0.75rem', fontWeight: '500', letterSpacing: '0.025em' }}>Total Videos</p>
-              <p style={{ fontSize: '2.5rem', fontWeight: '700', color: '#ffffff', lineHeight: '1' }}>{stats.totalUploads}</p>
-            </div>
-          </motion.div>
-
-          {/* Verified Videos Card */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.2 }}
-            whileHover={{ scale: 1.02, transition: { duration: 0.2 } }}
-            style={{
-              background: 'linear-gradient(135deg, rgba(52, 211, 153, 0.1) 0%, rgba(52, 211, 153, 0.05) 100%)',
-              backdropFilter: 'blur(20px) saturate(200%)',
-              WebkitBackdropFilter: 'blur(20px) saturate(200%)',
-              border: '1px solid rgba(52, 211, 153, 0.2)',
-              borderRadius: '24px',
-              padding: '2.5rem',
-              boxShadow: '0 20px 40px -15px rgba(0, 0, 0, 0.3)',
-              position: 'relative',
-              overflow: 'hidden'
-            }}
-          >
-            <div style={{ position: 'relative', zIndex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                <FiCheckCircle style={{ fontSize: '2.5rem', color: '#34d399' }} />
-                <span style={{ 
-                  padding: '0.25rem 0.75rem', 
-                  background: 'rgba(52, 211, 153, 0.2)', 
-                  borderRadius: '12px',
-                  fontSize: '0.75rem',
-                  color: '#34d399',
-                  fontWeight: '600'
-                }}>Verified</span>
-              </div>
-              <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginBottom: '0.75rem', fontWeight: '500', letterSpacing: '0.025em' }}>Authentic Videos</p>
-              <p style={{ fontSize: '2.5rem', fontWeight: '700', color: '#ffffff', lineHeight: '1' }}>{stats.verifiedVideos}</p>
-            </div>
-          </motion.div>
-
-          {/* Average Score Card */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.3 }}
-            whileHover={{ scale: 1.02, transition: { duration: 0.2 } }}
-            style={{
-              background: 'linear-gradient(135deg, rgba(167, 139, 250, 0.1) 0%, rgba(167, 139, 250, 0.05) 100%)',
-              backdropFilter: 'blur(20px) saturate(200%)',
-              WebkitBackdropFilter: 'blur(20px) saturate(200%)',
-              border: '1px solid rgba(167, 139, 250, 0.2)',
-              borderRadius: '24px',
-              padding: '2.5rem',
-              boxShadow: '0 20px 40px -15px rgba(0, 0, 0, 0.3)',
-              position: 'relative',
-              overflow: 'hidden'
-            }}
-          >
-            <div style={{ position: 'relative', zIndex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                <FiTrendingUp style={{ fontSize: '2.5rem', color: '#a78bfa' }} />
-                <span style={{ 
-                  padding: '0.25rem 0.75rem', 
-                  background: 'rgba(167, 139, 250, 0.2)', 
-                  borderRadius: '12px',
-                  fontSize: '0.75rem',
-                  color: '#a78bfa',
-                  fontWeight: '600'
-                }}>{!stats.hasReports ? 'No data' : stats.averageScore >= 70 ? 'High Score' : stats.averageScore >= 40 ? 'Moderate' : 'Low Score'}</span>
-              </div>
-              <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginBottom: '0.75rem', fontWeight: '500', letterSpacing: '0.025em' }}>Average Score</p>
-              <p style={{ fontSize: '2.5rem', fontWeight: '700', color: '#ffffff', lineHeight: '1' }}>{stats.hasReports ? `${stats.averageScore}%` : '—'}</p>
-            </div>
-          </motion.div>
-
-          {/* Processing Time Card */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.4 }}
-            whileHover={{ scale: 1.02, transition: { duration: 0.2 } }}
-            style={{
-              background: 'linear-gradient(135deg, rgba(251, 191, 36, 0.1) 0%, rgba(251, 191, 36, 0.05) 100%)',
-              backdropFilter: 'blur(20px) saturate(200%)',
-              WebkitBackdropFilter: 'blur(20px) saturate(200%)',
-              border: '1px solid rgba(251, 191, 36, 0.2)',
-              borderRadius: '24px',
-              padding: '2.5rem',
-              boxShadow: '0 20px 40px -15px rgba(0, 0, 0, 0.3)',
-              position: 'relative',
-              overflow: 'hidden'
-            }}
-          >
-            <div style={{ position: 'relative', zIndex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-                <FiClock style={{ fontSize: '2.5rem', color: '#fbbf24' }} />
-                <span style={{ 
-                  padding: '0.25rem 0.75rem', 
-                  background: 'rgba(251, 191, 36, 0.2)', 
-                  borderRadius: '12px',
-                  fontSize: '0.75rem',
-                  color: '#fbbf24',
-                  fontWeight: '600'
-                }}>{stats.processingTime === 0 ? 'No data' : stats.processingTime <= 60 ? 'Fast' : 'Slow'}</span>
-              </div>
-              <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginBottom: '0.75rem', fontWeight: '500', letterSpacing: '0.025em' }}>Avg. Processing</p>
-              <p style={{ fontSize: '2.5rem', fontWeight: '700', color: '#ffffff', lineHeight: '1' }}>{stats.processingTime === 0 ? '—' : `${stats.processingTime}s`}</p>
-            </div>
-          </motion.div>
+    <div className="page">
+      <header className="page-head">
+        <div>
+          <h1 className="display page-title">
+            {greeting()}
+            {name ? `, ${name}` : ''}
+          </h1>
+          <p className="page-lede">{lede}</p>
         </div>
+        <Link to="/upload" className="btn btn-primary">
+          <FiPlus aria-hidden="true" />
+          Verify a video
+        </Link>
+      </header>
 
-        {/* Charts Section */}
-        <div style={{
-          marginBottom: '3rem'
-        }}>
-          <h2 style={{
-            fontSize: '1.75rem',
-            fontWeight: '600',
-            color: '#ffffff',
-            marginBottom: '2rem',
-            paddingLeft: '0.5rem'
-          }}>Analytics Overview</h2>
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', 
-            gap: '2rem',
-            padding: '0 0.5rem'
-          }}>
-          {/* Line Chart */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.5 }}
-            style={{
-              background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)',
-              backdropFilter: 'blur(20px) saturate(200%)',
-              WebkitBackdropFilter: 'blur(20px) saturate(200%)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '24px',
-              padding: '2.5rem',
-              boxShadow: '0 20px 40px -15px rgba(0, 0, 0, 0.3)',
-              minHeight: '380px'
-            }}
-          >
-            <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '2rem', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span style={{ fontSize: '1.5rem' }}>📊</span>
-              <span>Weekly Performance</span>
-            </h3>
-            <div style={{ height: '250px' }}>
-              <Line data={chartData} options={chartOptions} />
-            </div>
-          </motion.div>
-
-          {/* Doughnut Chart */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.6 }}
-            style={{
-              background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)',
-              backdropFilter: 'blur(20px) saturate(200%)',
-              WebkitBackdropFilter: 'blur(20px) saturate(200%)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '24px',
-              padding: '2.5rem',
-              boxShadow: '0 20px 40px -15px rgba(0, 0, 0, 0.3)',
-              minHeight: '380px'
-            }}
-          >
-            <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '2rem', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span style={{ fontSize: '1.5rem' }}>🎯</span>
-              <span>Video Status Distribution</span>
-            </h3>
-            <div style={{ height: '250px' }}>
-              <Doughnut data={doughnutData} options={doughnutOptions} />
-            </div>
-          </motion.div>
-          </div>
+      <dl className={styles.ledger}>
+        <div className={styles.figure}>
+          <dt>Reports</dt>
+          <dd>{reports.length}</dd>
         </div>
-
-        {/* Quick Actions */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.7 }}
-          style={{
-            background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)',
-            backdropFilter: 'blur(20px) saturate(200%)',
-            WebkitBackdropFilter: 'blur(20px) saturate(200%)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            borderRadius: '24px',
-            padding: '2.5rem',
-            boxShadow: '0 20px 40px -15px rgba(0, 0, 0, 0.3)',
-            marginLeft: '0.5rem',
-            marginRight: '0.5rem'
-          }}
-        >
-          <h2 style={{ fontSize: '1.5rem', fontWeight: '600', marginBottom: '2rem', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontSize: '1.5rem' }}>⚡</span>
-            <span>Quick Actions</span>
-          </h2>
-          <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
-            <Link to="/upload" style={{ textDecoration: 'none' }}>
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                style={{
-                  padding: '1rem 2rem',
-                  borderRadius: '16px',
-                  background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)',
-                  color: 'white',
-                  border: 'none',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.75rem',
-                  fontSize: '1rem',
-                  fontWeight: '600',
-                  transition: 'all 0.3s',
-                  boxShadow: '0 10px 25px rgba(129, 140, 248, 0.3)'
-                }}
-              >
-                <FiUpload size={20} />
-                Upload New Video
-              </motion.button>
-            </Link>
-            
-            <Link to="/reports" style={{ textDecoration: 'none' }}>
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                style={{
-                  padding: '1rem 2rem',
-                  borderRadius: '16px',
-                  background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.05) 100%)',
-                  color: 'white',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.75rem',
-                  fontSize: '1rem',
-                  fontWeight: '600',
-                  transition: 'all 0.3s'
-                }}
-              >
-                <FiFileText size={20} />
-                View All Reports
-              </motion.button>
-            </Link>
+        {VERDICTS.map((v) => (
+          <div key={v} className={`${styles.figure} ${styles[v]}`}>
+            <dt>{VERDICT_LABEL[v]}</dt>
+            <dd>{counts[v]}</dd>
           </div>
-        </motion.div>
+        ))}
+      </dl>
+
+      <div className={styles.grid}>
+        <section className={`panel ${styles.recent}`} aria-labelledby="recent-heading">
+          <div className={styles.panelHead}>
+            <h2 id="recent-heading">Recent reports</h2>
+            {reports.length > 0 && <Link to="/reports">All reports</Link>}
+          </div>
+          {reports.length === 0 ? (
+            <div className={styles.empty}>
+              <p>No reports yet. Your video is analysed on this device, so nothing is uploaded.</p>
+              <Link to="/upload" className="btn btn-secondary">Verify your first video</Link>
+            </div>
+          ) : (
+            <ul className={styles.list}>
+              {reports.slice(0, 5).map((report) => (
+                <ReportRow key={report.id} report={report} />
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <aside className={styles.side}>
+          <section className={`panel ${styles.card}`} aria-labelledby="verdicts-heading">
+            <h2 id="verdicts-heading">Verdicts</h2>
+            {reports.length === 0 ? (
+              <p className="muted">Verdicts from your reports will be broken down here.</p>
+            ) : (
+              <>
+                <div className={styles.bar} role="img" aria-label={VERDICTS.map((v) => `${counts[v]} ${VERDICT_LABEL[v]}`).join(', ')}>
+                  {VERDICTS.filter((v) => counts[v] > 0).map((v, i) => (
+                    <motion.span
+                      key={v}
+                      className={styles.segment}
+                      style={{ background: VERDICT_COLOR[v] }}
+                      initial={{ flexGrow: 0 }}
+                      animate={{ flexGrow: counts[v] }}
+                      transition={{ duration: 0.7, delay: 0.15 + i * 0.08, ease: [0.2, 0.8, 0.2, 1] }}
+                    />
+                  ))}
+                </div>
+                <ul className={styles.legend}>
+                  {VERDICTS.map((v) => (
+                    <li key={v}>
+                      <span className={styles.swatch} style={{ background: VERDICT_COLOR[v] }} />
+                      <span>{VERDICT_LABEL[v]}</span>
+                      <strong>{Math.round((counts[v] / reports.length) * 100)}%</strong>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </section>
+
+          <section className={`panel ${styles.card}`} aria-labelledby="week-heading">
+            <h2 id="week-heading">Average score this week</h2>
+            {hasWeekData ? (
+              <div className={styles.chart}>
+                <Line
+                  data={{
+                    labels: week.labels,
+                    datasets: [
+                      {
+                        data: week.values,
+                        spanGaps: true,
+                        borderColor: '#c68f59',
+                        backgroundColor: 'rgba(198, 143, 89, 0.14)',
+                        fill: true,
+                        tension: 0.35,
+                        borderWidth: 2,
+                        pointRadius: 3,
+                        pointBackgroundColor: '#c68f59'
+                      }
+                    ]
+                  }}
+                  options={{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                      legend: { display: false },
+                      tooltip: {
+                        backgroundColor: '#1a120e',
+                        padding: 10,
+                        displayColors: false,
+                        callbacks: { label: (ctx) => `Average score ${ctx.parsed.y}` }
+                      }
+                    },
+                    scales: {
+                      x: { grid: { display: false }, ticks: { color: '#a8927a', font: { family: 'Figtree' } } },
+                      y: {
+                        min: 0,
+                        max: 100,
+                        ticks: { stepSize: 50, color: '#a8927a', font: { family: 'Figtree' } },
+                        grid: { color: '#4a3729' },
+                        border: { display: false }
+                      }
+                    }
+                  }}
+                />
+              </div>
+            ) : (
+              <p className="muted">No videos verified in the last 7 days.</p>
+            )}
+          </section>
+
+          {unfinished > 0 && (
+            <p className={styles.note}>
+              {unfinished} {unfinished === 1 ? 'analysis' : 'analyses'} didn’t finish, usually because the page was closed
+              while a video was being checked. <Link to="/upload">Verify it again</Link>.
+            </p>
+          )}
+        </aside>
       </div>
     </div>
-    </>
   );
 };
 

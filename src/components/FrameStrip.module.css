@@ -1,0 +1,130 @@
+.wrap {
+  margin: 0;
+}
+
+/* Film base with sprocket holes along both edges */
+.film {
+  --hole: rgba(230, 210, 179, 0.85);
+  position: relative;
+  overflow: hidden;
+  padding: 22px 10px;
+  border-radius: 8px;
+  background-color: var(--film);
+  box-shadow: inset 0 0 0 1px rgba(230, 210, 179, 0.06);
+  background-image:
+    repeating-linear-gradient(90deg, var(--hole) 0 9px, transparent 9px 22px),
+    repeating-linear-gradient(90deg, var(--hole) 0 9px, transparent 9px 22px);
+  background-size: 100% 7px, 100% 7px;
+  background-position: 6px 8px, 6px calc(100% - 8px);
+  background-repeat: no-repeat;
+}
+
+.cells {
+  display: grid;
+  grid-template-columns: repeat(var(--count), minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cell {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #2a1f18;
+}
+
+.frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* The loupe: a band of light that sweeps the strip while frames are being checked */
+.loupe {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18%;
+  left: -18%;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(198, 143, 89, 0.18) 35%,
+    rgba(240, 214, 182, 0.5) 50%,
+    rgba(198, 143, 89, 0.18) 65%,
+    transparent
+  );
+  mix-blend-mode: screen;
+  animation: sweep 2.2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+.loupe::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: #f0d6b6;
+}
+
+@keyframes sweep {
+  to {
+    left: 100%;
+  }
+}
+
+.readings {
+  display: grid;
+  grid-template-columns: repeat(var(--count), minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px 10px 0;
+}
+
+.reading {
+  min-height: 20px;
+  font-size: var(--t-sm);
+}
+
+.score {
+  display: inline-block;
+  color: var(--ink-2);
+}
+
+.score strong {
+  font-weight: 700;
+}
+
+.authentic strong { color: var(--authentic); }
+.review strong { color: var(--review); }
+.flagged strong { color: var(--flagged); }
+
+.pending {
+  color: var(--ink-3);
+}
+
+@media (max-width: 640px) {
+  .film {
+    padding: 18px 6px;
+  }
+
+  .cells,
+  .readings {
+    gap: 4px;
+  }
+
+  .reading {
+    font-size: var(--t-xs);
+  }
+
+  .score {
+    font-size: 0;
+  }
+
+  .score strong {
+    font-size: var(--t-xs);
+  }
+}

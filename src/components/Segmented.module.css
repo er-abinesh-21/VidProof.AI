@@ -1,0 +1,68 @@
+.group {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  gap: 2px;
+  padding: 3px;
+  background: var(--table-deep);
+  border-radius: var(--r-control);
+}
+
+.option {
+  position: relative;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--t-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.option:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.option:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.selected {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.indicator {
+  position: absolute;
+  inset: 0;
+  background: var(--sheet);
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(10, 6, 4, 0.5), inset 0 0 0 1px var(--rule-strong);
+}
+
+.text {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.group::-webkit-scrollbar {
+  display: none;
+}
+
+.option {
+  flex-shrink: 0;
+}
+
+@media (max-width: 560px) {
+  .option {
+    padding: 0 10px;
+  }
+}

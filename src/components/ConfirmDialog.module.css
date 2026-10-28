@@ -1,0 +1,39 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(14, 9, 7, 0.66);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+.dialog {
+  width: 100%;
+  max-width: 420px;
+  padding: 28px;
+  background: var(--sheet-raised);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-panel);
+  box-shadow: var(--lift);
+}
+
+.title {
+  font-size: var(--t-lg);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.message {
+  margin-top: 8px;
+  color: var(--ink-2);
+}
+
+.actions {
+  margin-top: 24px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

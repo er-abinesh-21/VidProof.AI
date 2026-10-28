@@ -1,0 +1,150 @@
+.shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+}
+
+/* Form side */
+.formSide {
+  display: flex;
+  flex-direction: column;
+  padding: 32px 48px;
+  min-height: 100vh;
+}
+
+.logoLink {
+  text-decoration: none;
+  align-self: flex-start;
+}
+
+.formBox {
+  width: 100%;
+  max-width: 400px;
+  margin: auto;
+  padding: 48px 0;
+}
+
+.title {
+  font-size: clamp(2.5rem, 3.6vw, 3.25rem);
+}
+
+.lede {
+  margin-top: 12px;
+  margin-bottom: 32px;
+  font-size: var(--t-md);
+  color: var(--ink-2);
+}
+
+.footer {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--rule);
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+}
+
+.note {
+  font-size: var(--t-xs);
+  color: var(--ink-3);
+}
+
+/* Brand side: the reference composition, stripes crossed by a band */
+.brandSide {
+  position: relative;
+  overflow: hidden;
+  min-height: 100vh;
+  background:
+    radial-gradient(90% 60% at 70% 0%, rgba(220, 171, 120, 0.3), transparent 65%),
+    radial-gradient(70% 50% at 10% 100%, rgba(10, 6, 4, 0.7), transparent 70%),
+    linear-gradient(180deg, #a2744a 0%, #84603e 45%, #6a4a30 100%);
+  box-shadow: inset 24px 0 40px -24px rgba(10, 6, 4, 0.8);
+  color: var(--ink);
+}
+
+.colorbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
+}
+
+.stripes {
+  position: absolute;
+  inset: 0 40px;
+  padding: 0 14px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* Fade the stripes out behind the headline */
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, transparent 30%, #000 56%, #000 100%);
+  mask-image: linear-gradient(180deg, transparent 0%, transparent 30%, #000 56%, #000 100%);
+}
+
+.stripe {
+  justify-self: center;
+  width: 56%;
+  height: 100%;
+  transform-origin: top;
+  box-shadow: 0 0 30px rgba(10, 6, 4, 0.35);
+}
+
+/* Each stripe is shaded like a strip of paper: darker at the edges, lighter in the middle */
+.espresso {
+  background: linear-gradient(90deg, rgba(255, 245, 230, 0.05), transparent 30%, transparent 70%, rgba(0, 0, 0, 0.28)), #3b2a20;
+}
+
+.caramel {
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.14), transparent 30%, transparent 70%, rgba(0, 0, 0, 0.2)), #c68f59;
+}
+
+.mocha {
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.12), transparent 30%, transparent 70%, rgba(0, 0, 0, 0.16)), #e6d2b3;
+}
+
+.roast {
+  background: linear-gradient(90deg, rgba(255, 245, 230, 0.04), transparent 30%, transparent 70%, rgba(0, 0, 0, 0.3)), #1a120e;
+}
+
+.claim {
+  position: relative;
+  z-index: 2;
+  margin: 96px 56px 0;
+  font-size: clamp(2.75rem, 4.6vw, 4.25rem);
+  font-weight: 800;
+  max-width: 10ch;
+  text-shadow: 0 2px 24px rgba(10, 6, 4, 0.35);
+}
+
+.ribbon {
+  position: absolute;
+  z-index: 2;
+  left: 40px;
+  right: 40px;
+  top: 54%;
+}
+
+/* Shared pieces for the forms inside */
+.form {
+  display: grid;
+  gap: 18px;
+}
+
+@media (max-width: 960px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .brandSide {
+    display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .formSide {
+    padding: 20px 16px;
+  }
+
+  .formBox {
+    padding: 32px 0;
+  }
+}

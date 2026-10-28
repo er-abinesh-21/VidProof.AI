@@ -43,6 +43,7 @@ export interface VerificationReport {
   id: string;
   video_id: string;
   user_id: string;
+  filename?: string;
   authenticity_score: number;
   deepfake_likelihood: number;
   transcript: string;
@@ -53,6 +54,7 @@ export interface VerificationReport {
   } | null;
   tampering_indicators: string[];
   key_frames: string[];
+  frame_scores?: number[];
   metadata: any;
   retention_days: number;
   expires_at?: { toDate: () => Date };

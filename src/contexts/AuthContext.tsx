@@ -69,7 +69,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const credential = await createUserWithEmailAndPassword(auth, email, password);
       if (displayName) await updateProfile(credential.user, { displayName });
-      toast.success('Account created successfully!');
+      toast.success('Account created');
     } catch (error: any) {
       toast.error(authMessage(error, 'Failed to create account'));
       throw error;
@@ -79,7 +79,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signIn = async (email: string, password: string) => {
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      toast.success('Signed in successfully!');
+      toast.success('Signed in');
     } catch (error: any) {
       toast.error(authMessage(error, 'Failed to sign in'));
       throw error;
@@ -89,7 +89,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signInWithGoogle = async () => {
     try {
       await signInWithPopup(auth, new GoogleAuthProvider());
-      toast.success('Signed in with Google!');
+      toast.success('Signed in with Google');
     } catch (error: any) {
       // Closing the popup is not an error worth surfacing
       if (error.code !== 'auth/popup-closed-by-user' && error.code !== 'auth/cancelled-popup-request') {
@@ -112,7 +112,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signOut = async () => {
     try {
       await firebaseSignOut(auth);
-      toast.success('Signed out successfully!');
+      toast.success('Signed out');
     } catch (error: any) {
       toast.error(error.message || 'Failed to sign out');
       throw error;

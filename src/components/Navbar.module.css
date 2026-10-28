@@ -1,0 +1,137 @@
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: rgba(36, 25, 18, 0.86);
+  backdrop-filter: saturate(160%) blur(12px);
+  -webkit-backdrop-filter: saturate(160%) blur(12px);
+  border-bottom: 1px solid var(--rule);
+}
+
+.inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 32px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 40px;
+}
+
+.brand {
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.nav {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  height: 100%;
+}
+
+.link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--ink-2);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.15s ease;
+}
+
+.link:hover {
+  color: var(--ink);
+}
+
+.active {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.indicator {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px 2px 0 0;
+}
+
+.account {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.avatar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #dcab78 0%, #c68f59 60%, #a87442 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 245, 230, 0.35), 0 4px 12px -4px rgba(198, 143, 89, 0.6);
+  color: #1a120e;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--t-sm);
+}
+
+.who {
+  font-size: var(--t-sm);
+  color: var(--ink-2);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.signOut {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: var(--t-sm);
+}
+
+@media (max-width: 860px) {
+  .who {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .inner {
+    padding: 0 12px;
+    gap: 12px;
+  }
+
+  .brand :global(svg) + span {
+    display: none;
+  }
+
+  .link {
+    padding: 0 8px;
+    font-size: var(--t-sm);
+  }
+
+  .indicator {
+    left: 8px;
+    right: 8px;
+  }
+
+  .signOutLabel {
+    display: none;
+  }
+
+  .signOut {
+    width: 36px;
+    padding: 0;
+  }
+}

@@ -1,0 +1,30 @@
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink);
+}
+
+.inverse {
+  color: var(--ink);
+}
+
+.mark {
+  width: 24px;
+  height: 24px;
+}
+
+.dot {
+  fill: var(--accent);
+}
+
+.inverse .dot {
+  fill: var(--accent);
+}
+
+.word {
+  font-family: var(--font-display);
+  font-size: 1.1875rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}

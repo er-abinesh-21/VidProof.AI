@@ -1,0 +1,49 @@
+.toolbar {
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+
+.count {
+  font-size: var(--t-xs);
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.listPanel {
+  padding: 4px;
+}
+
+.list {
+  list-style: none;
+}
+
+.none {
+  padding: 28px 20px;
+  color: var(--ink-3);
+}
+
+.empty {
+  padding: 40px;
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+}
+
+.empty h2 {
+  font-family: var(--font-display);
+  font-size: var(--t-xl);
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.empty p {
+  color: var(--ink-2);
+  max-width: 52ch;
+  margin-bottom: 10px;
+}
+
+@media (max-width: 560px) {
+  .empty {
+    padding: 24px;
+  }
+}

@@ -130,11 +130,11 @@ const runModel = <T>(task: string, payload: object, transfer: Transferable[] = [
     }
   });
 
-// Average deepfake likelihood (0-100) across frames, or null if the model could not run
-const analyzeFramesForDeepfake = async (frames: string[]): Promise<number | null> => {
+// Deepfake likelihood (0-100) of each frame, or null if the model could not run
+const analyzeFramesForDeepfake = async (frames: string[]): Promise<number[] | null> => {
   const probabilities = await runModel<number[]>('deepfake', { frames });
-  if (!probabilities || probabilities.length === 0) return null;
-  return Math.round((probabilities.reduce((acc, p) => acc + p, 0) / probabilities.length) * 100);
+  if (!probabilities || probabilities.length !== frames.length) return null;
+  return probabilities.map((p) => Math.round(p * 100));
 };
 
 // Decode the video's audio track to 16kHz mono samples; null when there is no usable audio
@@ -226,45 +226,60 @@ const hashFile = async (file: File): Promise<string | null> => {
   }
 };
 
+export type AnalysisStage = 'frames' | 'deepfake' | 'transcript' | 'sentiment' | 'saving';
+
+export interface AnalysisProgress {
+  stage: AnalysisStage;
+  frames?: string[];
+  frameScores?: number[];
+}
+
 // Main processing function
-export const processVideo = async (videoId: string, file: File, userId: string, retentionDays: number) => {
+export const processVideo = async (
+  videoId: string,
+  file: File,
+  userId: string,
+  retentionDays: number,
+  onProgress: (progress: AnalysisProgress) => void = () => {}
+) => {
   // The video is analysed in the browser straight from the selected file (nothing is stored)
   const videoUrl = URL.createObjectURL(file);
   const startedAt = Date.now();
 
   try {
-    toast('Starting AI analysis...', { icon: '🔍' });
-
-    toast('Extracting video frames...', { icon: '🎬' });
+    onProgress({ stage: 'frames' });
     const frames = await extractFrames(videoUrl);
     if (frames.length === 0) {
       throw new Error('Could not read frames from this video. The file may be corrupt or use an unsupported codec.');
     }
 
-    toast('Analyzing for deepfakes (AI models download on first use)...', { icon: '🤖' });
-    let deepfakeScore = await analyzeFramesForDeepfake(frames);
+    onProgress({ stage: 'deepfake', frames });
+    let frameScores = await analyzeFramesForDeepfake(frames);
+    if (frameScores) onProgress({ stage: 'transcript', frames, frameScores });
+    else onProgress({ stage: 'transcript', frames });
 
-    toast('Extracting speech content...', { icon: '🎤' });
     let transcript = await extractTranscript(file);
 
-    toast('Analyzing sentiment...', { icon: '💭' });
+    onProgress({ stage: 'sentiment', frames, frameScores: frameScores || undefined });
     let sentiment = transcript ? await analyzeSentiment(transcript) : null;
 
     let demoData = false;
-    if (deepfakeScore === null) {
+    if (frameScores === null) {
       if (!DEMO_MODE) {
         throw new Error(
           'The AI models could not run. Check your internet connection (they download on first use) and try again.'
         );
       }
       demoData = true;
-      deepfakeScore = 15;
+      frameScores = frames.map(() => 15);
       transcript = 'Demo transcript: placeholder text, not from this video.';
       sentiment = { positive: 60, negative: 10, neutral: 30 };
       toast('AI models unavailable: showing demo data', { icon: '⚠️' });
     }
 
+    const deepfakeScore = Math.round(frameScores.reduce((acc, p) => acc + p, 0) / frameScores.length);
     const tamperingIndicators = detectTamperingIndicators(deepfakeScore, sentiment);
+    onProgress({ stage: 'saving', frames, frameScores });
 
     // Overall authenticity score (sentiment counts as neutral when there was no speech to analyse)
     const authenticityScore = Math.min(
@@ -282,12 +297,14 @@ export const processVideo = async (videoId: string, file: File, userId: string, 
     const reportData = {
       video_id: videoId,
       user_id: userId,
+      filename: file.name,
       authenticity_score: authenticityScore,
       deepfake_likelihood: deepfakeScore,
       transcript: transcript || '',
       sentiment_analysis: sentiment,
       tampering_indicators: tamperingIndicators,
-      key_frames: frames.slice(0, 3), // Store first 3 frames
+      key_frames: frames, // small JPEGs; all five stay well under Firestore's 1MB limit
+      frame_scores: frameScores,
       metadata: {
         processing_date: new Date().toISOString(),
         processing_seconds: Math.round((Date.now() - startedAt) / 1000),
@@ -306,7 +323,6 @@ export const processVideo = async (videoId: string, file: File, userId: string, 
     // Update video status
     await updateDoc(doc(db, COLLECTIONS.videoUploads, videoId), { status: 'completed' });
 
-    toast.success('Video analysis complete!');
     return report;
   } catch (error: any) {
     console.error('Error processing video:', error);
